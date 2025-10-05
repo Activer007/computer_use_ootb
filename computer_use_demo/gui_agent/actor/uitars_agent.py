@@ -114,7 +114,8 @@ def convert_ui_tars_action_to_json(action_str: str, screenshot_size: tuple[int, 
     output_dict = {
         "action": None,
         "value": None,
-        "position": None
+        "position": None,
+        "position_source": "ui-tars",
     }
 
     def _normalize_position(raw_x: int, raw_y: int) -> list[float] | list[int]:
@@ -138,6 +139,8 @@ def convert_ui_tars_action_to_json(action_str: str, screenshot_size: tuple[int, 
         action_name, x, y = match_position.groups()
         output_dict["action"] = ACTION_MAP[action_name]
         output_dict["position"] = _normalize_position(int(x), int(y))
+        if not screenshot_size:
+            output_dict["position_mode"] = "absolute"
         return json.dumps(output_dict)
 
     # 2) HOTKEY(...) e.g. hotkey(key='Enter')

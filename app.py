@@ -51,18 +51,24 @@ def setup_state(state):
         state["actor_model"] = "ShowUI"    # default
     if "planner_provider" not in state:
         state["planner_provider"] = "openai"  # default
+    if "planner_api_provider" not in state:
+        state["planner_api_provider"] = state["planner_provider"]
     if "actor_provider" not in state:
         state["actor_provider"] = "local"    # default
 
-     # Fetch API keys from environment variables
-    if "openai_api_key" not in state: 
+    # Fetch API keys from environment variables
+    if "openai_api_key" not in state:
         state["openai_api_key"] = os.getenv("OPENAI_API_KEY", "")
     if "anthropic_api_key" not in state:
-        state["anthropic_api_key"] = os.getenv("ANTHROPIC_API_KEY", "")    
+        state["anthropic_api_key"] = os.getenv("ANTHROPIC_API_KEY", "")
     if "qwen_api_key" not in state:
         state["qwen_api_key"] = os.getenv("QWEN_API_KEY", "")
-    if "ui_tars_url" not in state:
-        state["ui_tars_url"] = ""
+    if "gemini_api_key" not in state:
+        state["gemini_api_key"] = os.getenv("GEMINI_API_KEY", "")
+    if "ui_tars_url" not in state or not state["ui_tars_url"]:
+        state["ui_tars_url"] = os.getenv("UI_TARS_URL", state.get("ui_tars_url", ""))
+    if "ui_tars_api_key" not in state or not state["ui_tars_api_key"]:
+        state["ui_tars_api_key"] = os.getenv("UI_TARS_API_KEY", state.get("ui_tars_api_key", ""))
 
     # Set the initial api_key based on the provider
     if "planner_api_key" not in state:
@@ -72,6 +78,8 @@ def setup_state(state):
             state["planner_api_key"] = state["anthropic_api_key"]
         elif state["planner_provider"] == "qwen":
             state["planner_api_key"] = state["qwen_api_key"]
+        elif state["planner_provider"] == "gemini":
+            state["planner_api_key"] = state["gemini_api_key"]
         else:
             state["planner_api_key"] = ""
 
@@ -232,8 +240,10 @@ def process_input(user_input, state):
         only_n_most_recent_images=state["only_n_most_recent_images"],
         selected_screen=state['selected_screen'],
         showui_max_pixels=state['max_pixels'],
-        showui_awq_4bit=state['awq_4bit']
-    ):  
+        showui_awq_4bit=state['awq_4bit'],
+        ui_tars_url=state["ui_tars_url"],
+        ui_tars_api_key=state.get("ui_tars_api_key", "")
+    ):
         if loop_msg is None:
             yield state['chatbot_messages']
             logger.info("End of task. Close the loop.")
@@ -261,11 +271,13 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 # Planner
                 planner_model = gr.Dropdown(
                     label="Planner Model",
-                    choices=["gpt-4o", 
-                             "gpt-4o-mini", 
-                             "qwen2-vl-max", 
-                             "qwen2-vl-2b (local)", 
-                             "qwen2-vl-7b (local)", 
+                    choices=["gpt-4o",
+                             "gpt-4o-mini",
+                             "gemini-1.5-flash",
+                             "gemini-1.5-pro",
+                             "qwen2-vl-max",
+                             "qwen2-vl-2b (local)",
+                             "qwen2-vl-7b (local)",
                              "qwen2-vl-2b (ssh)", 
                              "qwen2-vl-7b (ssh)",
                              "qwen2.5-vl-7b (ssh)", 
@@ -294,6 +306,23 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                     label="Actor Model",
                     choices=["ShowUI", "UI-TARS"],
                     value="ShowUI",
+                    interactive=True,
+                )
+
+            with gr.Column():
+                ui_tars_url_input = gr.Textbox(
+                    label="UI-TARS URL",
+                    value=state.value.get("ui_tars_url", ""),
+                    placeholder="https://your-ui-tars-endpoint/v1",
+                    interactive=True,
+                )
+
+            with gr.Column():
+                ui_tars_api_key_input = gr.Textbox(
+                    label="UI-TARS API Key",
+                    value=state.value.get("ui_tars_api_key", ""),
+                    placeholder="Optional",
+                    type="password",
                     interactive=True,
                 )
 
@@ -360,7 +389,13 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     def update_only_n_images(only_n_images_value, state):
         state["only_n_most_recent_images"] = only_n_images_value
-    
+
+    def update_ui_tars_url(ui_tars_url_value, state):
+        state["ui_tars_url"] = ui_tars_url_value
+
+    def update_ui_tars_api_key(ui_tars_api_key_value, state):
+        state["ui_tars_api_key"] = ui_tars_api_key_value
+
     # Callback to update the second dropdown based on the first selection
     def update_second_menu(selected_category):
         return gr.update(choices=list(merged_dict.get(selected_category, {}).keys()))
@@ -444,9 +479,23 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             actor_model_value = "ShowUI"
             actor_model_interactive = True
 
+        elif model_selection in ["gemini-1.5-flash", "gemini-1.5-pro"]:
+            provider_choices = ["gemini"]
+            provider_value = "gemini"
+            provider_interactive = False
+            api_key_interactive = True
+            api_key_placeholder = "gemini API key"
+            actor_model_choices = ["ShowUI", "UI-TARS"]
+            actor_model_value = "ShowUI"
+            actor_model_interactive = True
+            api_key_type = "password"
+
         elif model_selection == "claude-3-5-sonnet-20241022":
-            # Provider can be any of the current choices except 'openai'
-            provider_choices = [option.value for option in APIProvider if option.value != "openai"]
+            provider_choices = [
+                APIProvider.ANTHROPIC.value,
+                APIProvider.BEDROCK.value,
+                APIProvider.VERTEX.value,
+            ]
             provider_value = "anthropic"  # Set default to 'anthropic'
             state['actor_provider'] = "anthropic"
             provider_interactive = True
@@ -462,7 +511,8 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
         # Update the provider in state
         state["planner_api_provider"] = provider_value
-        
+        state["planner_provider"] = provider_value
+
         # Update api_key in state based on the provider
         if provider_value == "openai":
             state["api_key"] = state.get("openai_api_key", "")
@@ -470,9 +520,15 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             state["api_key"] = state.get("anthropic_api_key", "")
         elif provider_value == "qwen":
             state["api_key"] = state.get("qwen_api_key", "")
+        elif provider_value == "gemini":
+            state["api_key"] = state.get("gemini_api_key", "")
         elif provider_value == "local":
             state["api_key"] = ""
+        elif provider_value in ("bedrock", "vertex"):
+            state["api_key"] = ""
         # SSH的情况已经在上面处理过了，这里不需要重复处理
+
+        state["planner_api_key"] = state.get("api_key", "")
 
         provider_update = gr.update(
             choices=provider_choices,
@@ -501,20 +557,43 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         state["actor_model"] = actor_model_selection
         logger.info(f"Actor model updated to: {state['actor_model']}")
 
-    def update_api_key_placeholder(provider_value, model_selection):
-        if model_selection == "claude-3-5-sonnet-20241022":
-            if provider_value == "anthropic":
-                return gr.update(placeholder="anthropic API key")
-            elif provider_value == "bedrock":
-                return gr.update(placeholder="bedrock API key")
-            elif provider_value == "vertex":
-                return gr.update(placeholder="vertex API key")
-            else:
-                return gr.update(placeholder="")
-        elif model_selection == "gpt-4o + ShowUI":
-            return gr.update(placeholder="openai API key")
-        else:
-            return gr.update(placeholder="")
+    def handle_planner_provider_change(provider_value, model_selection, state):
+        state["planner_provider"] = provider_value
+        state["planner_api_provider"] = provider_value
+
+        placeholder = ""
+        api_key_value = state.get("planner_api_key", "")
+        update_kwargs = {"type": "password"}
+
+        if provider_value == "anthropic":
+            placeholder = "anthropic API key"
+            api_key_value = state.get("anthropic_api_key", "")
+        elif provider_value == "bedrock":
+            placeholder = "bedrock API key"
+            api_key_value = ""
+        elif provider_value == "vertex":
+            placeholder = "vertex API key"
+            api_key_value = ""
+        elif provider_value == "openai":
+            placeholder = "openai API key"
+            api_key_value = state.get("openai_api_key", "")
+        elif provider_value == "qwen":
+            placeholder = "qwen API key"
+            api_key_value = state.get("qwen_api_key", "")
+        elif provider_value == "gemini":
+            placeholder = "gemini API key"
+            api_key_value = state.get("gemini_api_key", "")
+        elif provider_value == "local":
+            placeholder = "not required"
+            api_key_value = ""
+            update_kwargs["type"] = "password"
+        elif provider_value == "ssh":
+            placeholder = "ssh host and port (e.g. localhost:8000)"
+            update_kwargs["type"] = "text"
+        state["planner_api_key"] = api_key_value
+        state["api_key"] = api_key_value
+
+        return gr.update(value=api_key_value, placeholder=placeholder, **update_kwargs)
 
     def update_system_prompt_suffix(system_prompt_suffix, state):
         state["custom_system_prompt"] = system_prompt_suffix
@@ -602,7 +681,11 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     chatbot = gr.Chatbot(label="Chatbot History", type="tuples", autoscroll=True, height=580, group_consecutive_messages=False)
     
     planner_model.change(fn=update_planner_model, inputs=[planner_model, state], outputs=[planner_api_provider, planner_api_key, actor_model])
-    planner_api_provider.change(fn=update_api_key_placeholder, inputs=[planner_api_provider, planner_model], outputs=planner_api_key)
+    planner_api_provider.change(
+        fn=handle_planner_provider_change,
+        inputs=[planner_api_provider, planner_model, state],
+        outputs=planner_api_key,
+    )
     actor_model.change(fn=update_actor_model, inputs=[actor_model, state], outputs=None)
 
     screen_selector.change(fn=update_selected_screen, inputs=[screen_selector, state], outputs=None)
@@ -617,6 +700,11 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     first_menu.change(fn=update_second_menu, inputs=first_menu, outputs=second_menu)
     second_menu.change(fn=update_third_menu, inputs=[first_menu, second_menu], outputs=third_menu)
     third_menu.change(fn=update_textbox, inputs=[first_menu, second_menu, third_menu], outputs=[chat_input, image_preview, hintbox])
+
+    ui_tars_url_input.change(fn=update_ui_tars_url, inputs=[ui_tars_url_input, state], outputs=None)
+    ui_tars_url_input.submit(fn=update_ui_tars_url, inputs=[ui_tars_url_input, state], outputs=None)
+    ui_tars_api_key_input.change(fn=update_ui_tars_api_key, inputs=[ui_tars_api_key_input, state], outputs=None)
+    ui_tars_api_key_input.submit(fn=update_ui_tars_api_key, inputs=[ui_tars_api_key_input, state], outputs=None)
 
     # chat_input.submit(process_input, [chat_input, state], chatbot)
     submit_button.click(process_input, [chat_input, state], chatbot)

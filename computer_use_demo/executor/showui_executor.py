@@ -36,14 +36,18 @@ class ShowUIExecutor:
             ComputerTool(selected_screen=selected_screen, is_scaling=False)
         )
         
-        self.supported_action_type={
+        self.supported_action_type = {
             # "showui_action": "anthropic_tool_action"
-            "CLICK": 'key',  # TBD
-            "INPUT": "key",
-            "ENTER": "key",  # TBD
+            "CLICK": "mouse",
+            "HOVER": "mouse",
+            "INPUT": "type",
+            "ENTER": "key",
             "ESC": "key",
             "ESCAPE": "key",
-            "PRESS":  "key",
+            "PRESS": "mouse",
+            "SCROLL": "scroll",
+            "HOTKEY": "key",
+            "STOP": None,
         }
 
     def __call__(self, response: str, messages: list[BetaMessageParam]):
@@ -70,9 +74,21 @@ class ShowUIExecutor:
                 self.output_callback(f"{colorful_text_showui}:\n{action}", sender="bot")
                 print("Converted Action:", action)
                 
-                sim_content_block = BetaToolUseBlock(id=f'toolu_{uuid.uuid4()}',
-                                        input={'action': action["action"], 'text': action["text"], 'coordinate': action["coordinate"]},
-                                        name='computer', type='tool_use')
+                tool_input: Dict[str, Any] = {
+                    "action": action["action"],
+                    "text": action.get("text"),
+                    "coordinate": action.get("coordinate"),
+                }
+
+                if "scroll_direction" in action:
+                    tool_input["scroll_direction"] = action["scroll_direction"]
+
+                sim_content_block = BetaToolUseBlock(
+                    id=f'toolu_{uuid.uuid4()}',
+                    input=tool_input,
+                    name='computer',
+                    type='tool_use'
+                )
                 
                 # update messages
                 new_message = {
@@ -120,7 +136,7 @@ class ShowUIExecutor:
     def _parse_showui_output(self, output_text: str) -> Union[List[Dict[str, Any]], None]:
         try:
             output_text = output_text.strip()
-            
+
             # process single dictionary
             if output_text.startswith("{") and output_text.endswith("}"):
                 output_text = f"[{output_text}]"
@@ -148,48 +164,74 @@ class ShowUIExecutor:
                 raise ValueError("Not all items in the parsed output are dictionaries.")
 
             # refine key: value pairs, mapping to the Anthropic's format
-            refined_output = []
-            
+            refined_output: list[Dict[str, Any]] = []
+
+            stop_encountered = False
+
             for action_item in parsed_output:
-                
+
                 print("Action Item:", action_item)
                 # sometime showui returns lower case action names
                 action_item["action"] = action_item["action"].upper()
-                
+
                 if action_item["action"] not in self.supported_action_type:
-                    raise ValueError(f"Action {action_item['action']} not supported. Check the output from ShowUI: {output_text}")
-                    # continue
-                
-                elif action_item["action"] == "CLICK":  # 1. click -> mouse_move + left_click
-                    action_item["position"] = self._to_screen_coordinates(action_item["position"])
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
+                    raise ValueError(
+                        f"Action {action_item['action']} not supported. Check the output from ShowUI: {output_text}"
+                    )
+
+                if action_item["action"] == "STOP":
+                    stop_encountered = True
+                    # Stop indicates that there are no more actions to execute.
+                    break
+
+                if action_item["action"] == "CLICK":  # 1. click -> mouse_move + left_click
+                    coordinate = self._resolve_coordinate(action_item)
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
                     refined_output.append({"action": "left_click", "text": None, "coordinate": None})
-                
+
                 elif action_item["action"] == "INPUT":  # 2. input -> type
                     refined_output.append({"action": "type", "text": action_item["value"], "coordinate": None})
-                
+
                 elif action_item["action"] == "ENTER":  # 3. enter -> key, enter
                     refined_output.append({"action": "key", "text": "Enter", "coordinate": None})
-                
+
                 elif action_item["action"] == "ESC" or action_item["action"] == "ESCAPE":  # 4. enter -> key, enter
                     refined_output.append({"action": "key", "text": "Escape", "coordinate": None})
-                    
+
                 elif action_item["action"] == "HOVER":  # 5. hover -> mouse_move
-                    action_item["position"] = self._to_screen_coordinates(action_item["position"])
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
-                    
-                elif action_item["action"] == "SCROLL":  # 6. scroll -> key: pagedown
-                    if action_item["value"] == "up":
-                        refined_output.append({"action": "key", "text": "pageup", "coordinate": None})
-                    elif action_item["value"] == "down":
-                        refined_output.append({"action": "key", "text": "pagedown", "coordinate": None})
-                    else:
-                        raise ValueError(f"Scroll direction {action_item['value']} not supported.")
+                    coordinate = self._resolve_coordinate(action_item)
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
+
+                elif action_item["action"] == "SCROLL":  # 6. scroll -> scroll tool
+                    direction = (action_item.get("value") or "down").lower()
+                    if direction not in {"up", "down", "left", "right"}:
+                        raise ValueError(f"Scroll direction {direction} not supported.")
+
+                    payload: Dict[str, Any] = {
+                        "action": "scroll",
+                        "text": None,
+                        "coordinate": None,
+                        "scroll_direction": direction,
+                    }
+
+                    if action_item.get("position") is not None:
+                        payload["coordinate"] = self._resolve_coordinate(action_item)
+
+                    refined_output.append(payload)
+
+                elif action_item["action"] == "HOTKEY":
+                    key_value = action_item.get("value")
+                    if not key_value:
+                        continue
+                    refined_output.append({"action": "key", "text": key_value, "coordinate": None})
 
                 elif action_item["action"] == "PRESS":  # 7. press
-                    action_item["position"] = self._to_screen_coordinates(action_item["position"])
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
+                    coordinate = self._resolve_coordinate(action_item)
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
                     refined_output.append({"action": "left_press", "text": None, "coordinate": None})
+
+            if stop_encountered:
+                return refined_output
 
             return refined_output
 
@@ -197,32 +239,55 @@ class ShowUIExecutor:
             print(f"Error parsing output: {e}")
             return None
 
-    def _to_screen_coordinates(self, position):
+    def _resolve_coordinate(self, action_item: Dict[str, Any]) -> tuple[int, int]:
+        position = action_item.get("position")
         if position is None:
-            raise ValueError("Position is required for pointer actions.")
+            raise ValueError(f"Action {action_item['action']} requires a position but none was provided.")
 
         if not isinstance(position, (list, tuple)) or len(position) != 2:
-            raise ValueError(f"Unexpected position format: {position}")
+            raise ValueError(f"Invalid position payload: {position}")
 
-        x, y = position
+        x_raw, y_raw = position
+
+        try:
+            x_value = float(x_raw)
+            y_value = float(y_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Position values must be numeric: {position}") from exc
+
+        position_mode = (action_item.get("position_mode") or "").lower()
+        position_source = (action_item.get("position_source") or "").lower()
+        is_absolute = position_mode in {"absolute"} or bool(action_item.get("is_absolute"))
+
+        if not is_absolute:
+            if position_source in {"absolute"}:
+                is_absolute = True
+            elif position_source in {"ui-tars", "ui_tars"} and (x_value > 1 or y_value > 1):
+                is_absolute = True
+
+        if not is_absolute and (x_value > 1 or y_value > 1):
+            is_absolute = True
+
+        x_offset = self.screen_bbox[0]
+        y_offset = self.screen_bbox[1]
         width = self.screen_bbox[2] - self.screen_bbox[0]
         height = self.screen_bbox[3] - self.screen_bbox[1]
 
         if width <= 0 or height <= 0:
             raise ValueError("Invalid screen bounds returned from monitor lookup.")
 
-        if (isinstance(x, (int, float)) and isinstance(y, (int, float)) and
-                (x > 1 or y > 1)):
-            x_px = int(round(x))
-            y_px = int(round(y))
-        else:
-            x_px = int(round(max(0.0, min(1.0, float(x))) * (width - 1)))
-            y_px = int(round(max(0.0, min(1.0, float(y))) * (height - 1)))
+        if is_absolute:
+            x_px = int(round(x_value))
+            y_px = int(round(y_value))
+            return x_px + x_offset, y_px + y_offset
+
+        x_px = int(round(max(0.0, min(1.0, x_value)) * width))
+        y_px = int(round(max(0.0, min(1.0, y_value)) * height))
 
         x_px = min(max(x_px, 0), width - 1)
         y_px = min(max(y_px, 0), height - 1)
 
-        return x_px, y_px
+        return x_px + x_offset, y_px + y_offset
         
 
     def _get_screen_resolution(self):
