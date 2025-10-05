@@ -76,3 +76,29 @@ def test_click_coordinates_within_bounds():
     x, y = mouse_moves[0]["coordinate"]
     assert 0 <= x < 1920
     assert 0 <= y < 1080
+
+
+def test_parse_showui_fallback_preserves_string_literals():
+    executor = ShowUIExecutor(output_callback=lambda *args, **kwargs: None,
+                              tool_output_callback=lambda *args, **kwargs: None)
+
+    # Single quotes require the sanitized literal-eval fallback
+    action_json = "[{'action': 'input', 'value': \"literal true\", 'position': [0.1, 0.2]}]"
+
+    refined_actions = executor._parse_showui_output(action_json)
+    assert refined_actions == [
+        {"action": "type", "text": "literal true", "coordinate": None}
+    ]
+
+
+def test_parse_showui_fallback_converts_json_literals_outside_strings():
+    executor = ShowUIExecutor(output_callback=lambda *args, **kwargs: None,
+                              tool_output_callback=lambda *args, **kwargs: None)
+
+    action_json = "[{\"action\": \"click\", \"value\": null, \"position\": [0.25, 0.75]}]"
+
+    refined_actions = executor._parse_showui_output(action_json)
+
+    assert refined_actions[0]["action"] == "mouse_move"
+    assert refined_actions[0]["coordinate"] == (480, 809)
+    assert refined_actions[1] == {"action": "left_click", "text": None, "coordinate": None}

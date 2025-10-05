@@ -109,7 +109,7 @@ class ShowUIExecutor:
             return action_output
         else:
             try:
-                action_output.replace("'", "\"")
+                action_output = action_output.replace("'", "\"")
                 action_dict = ast.literal_eval(action_output)
                 return action_dict
             except Exception as e:
