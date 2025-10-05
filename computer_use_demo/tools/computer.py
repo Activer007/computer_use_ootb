@@ -386,7 +386,10 @@ class ComputerTool(BaseAnthropicTool):
     ):
         print(f"action: {action}, text: {text}, coordinate: {coordinate}")
         action = self.action_conversion.get(action, action)
-        
+
+        scroll_direction = kwargs.get("scroll_direction", "down")
+        scroll_amount = kwargs.get("scroll_amount", 10)
+
         if action in ("mouse_move", "left_click_drag"):
             if coordinate is None:
                 raise ToolError(f"coordinate is required for {action}")
@@ -419,6 +422,35 @@ class ComputerTool(BaseAnthropicTool):
                 current_x, current_y = pyautogui.position()
                 pyautogui.dragTo(x, y, duration=0.5)  # Adjust duration as needed
                 return ToolResult(output=f"Dragged mouse from ({current_x}, {current_y}) to ({x}, {y})")
+
+        if action == "scroll":
+            if coordinate is None:
+                if scroll_direction in ("up", "down"):
+                    pyautogui.scroll(scroll_amount if scroll_direction == "up" else -scroll_amount)
+                elif scroll_direction in ("left", "right"):
+                    pyautogui.hscroll(scroll_amount if scroll_direction == "right" else -scroll_amount)
+                else:
+                    raise ToolError(f"Unsupported scroll direction: {scroll_direction}")
+                return ToolResult(output=f"Scrolled {scroll_direction}")
+
+            if not isinstance(coordinate, (list, tuple)) or len(coordinate) != 2:
+                raise ToolError(f"{coordinate} must be a tuple of length 2")
+
+            if self.is_scaling:
+                x, y = self.scale_coordinates(
+                    ScalingSource.API, coordinate[0], coordinate[1]
+                )
+            else:
+                x, y = coordinate
+
+            if scroll_direction in ("up", "down"):
+                pyautogui.scroll(scroll_amount if scroll_direction == "up" else -scroll_amount, x, y)
+            elif scroll_direction in ("left", "right"):
+                pyautogui.hscroll(scroll_amount if scroll_direction == "right" else -scroll_amount, x, y)
+            else:
+                raise ToolError(f"Unsupported scroll direction: {scroll_direction}")
+
+            return ToolResult(output=f"Scrolled {scroll_direction} at {x}, {y}")
 
         if action in ("key", "type"):
             if text is None:
