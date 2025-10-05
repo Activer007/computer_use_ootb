@@ -66,7 +66,8 @@ def sampling_loop_sync(
     selected_screen: int = 0,
     showui_max_pixels: int = 1344,
     showui_awq_4bit: bool = False,
-    ui_tars_url: str = ""
+    ui_tars_url: str = "",
+    ui_tars_api_key: str = ""
 ):
     """
     Synchronous agentic sampling loop for the assistant/tool interaction of computer use.
@@ -200,6 +201,7 @@ def sampling_loop_sync(
         actor = UITARS_Actor(
             ui_tars_url=ui_tars_url,
             output_callback=output_callback,
+            api_key=ui_tars_api_key,
             selected_screen=selected_screen
         )
         

@@ -61,8 +61,10 @@ def setup_state(state):
         state["anthropic_api_key"] = os.getenv("ANTHROPIC_API_KEY", "")    
     if "qwen_api_key" not in state:
         state["qwen_api_key"] = os.getenv("QWEN_API_KEY", "")
-    if "ui_tars_url" not in state:
-        state["ui_tars_url"] = ""
+    if "ui_tars_url" not in state or not state["ui_tars_url"]:
+        state["ui_tars_url"] = os.getenv("UI_TARS_URL", state.get("ui_tars_url", ""))
+    if "ui_tars_api_key" not in state or not state["ui_tars_api_key"]:
+        state["ui_tars_api_key"] = os.getenv("UI_TARS_API_KEY", state.get("ui_tars_api_key", ""))
 
     # Set the initial api_key based on the provider
     if "planner_api_key" not in state:
@@ -232,8 +234,10 @@ def process_input(user_input, state):
         only_n_most_recent_images=state["only_n_most_recent_images"],
         selected_screen=state['selected_screen'],
         showui_max_pixels=state['max_pixels'],
-        showui_awq_4bit=state['awq_4bit']
-    ):  
+        showui_awq_4bit=state['awq_4bit'],
+        ui_tars_url=state["ui_tars_url"],
+        ui_tars_api_key=state.get("ui_tars_api_key", "")
+    ):
         if loop_msg is None:
             yield state['chatbot_messages']
             logger.info("End of task. Close the loop.")
@@ -294,6 +298,23 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                     label="Actor Model",
                     choices=["ShowUI", "UI-TARS"],
                     value="ShowUI",
+                    interactive=True,
+                )
+
+            with gr.Column():
+                ui_tars_url_input = gr.Textbox(
+                    label="UI-TARS URL",
+                    value=state.value.get("ui_tars_url", ""),
+                    placeholder="https://your-ui-tars-endpoint/v1",
+                    interactive=True,
+                )
+
+            with gr.Column():
+                ui_tars_api_key_input = gr.Textbox(
+                    label="UI-TARS API Key",
+                    value=state.value.get("ui_tars_api_key", ""),
+                    placeholder="Optional",
+                    type="password",
                     interactive=True,
                 )
 
@@ -360,7 +381,13 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     def update_only_n_images(only_n_images_value, state):
         state["only_n_most_recent_images"] = only_n_images_value
-    
+
+    def update_ui_tars_url(ui_tars_url_value, state):
+        state["ui_tars_url"] = ui_tars_url_value
+
+    def update_ui_tars_api_key(ui_tars_api_key_value, state):
+        state["ui_tars_api_key"] = ui_tars_api_key_value
+
     # Callback to update the second dropdown based on the first selection
     def update_second_menu(selected_category):
         return gr.update(choices=list(merged_dict.get(selected_category, {}).keys()))
@@ -617,6 +644,11 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     first_menu.change(fn=update_second_menu, inputs=first_menu, outputs=second_menu)
     second_menu.change(fn=update_third_menu, inputs=[first_menu, second_menu], outputs=third_menu)
     third_menu.change(fn=update_textbox, inputs=[first_menu, second_menu, third_menu], outputs=[chat_input, image_preview, hintbox])
+
+    ui_tars_url_input.change(fn=update_ui_tars_url, inputs=[ui_tars_url_input, state], outputs=None)
+    ui_tars_url_input.submit(fn=update_ui_tars_url, inputs=[ui_tars_url_input, state], outputs=None)
+    ui_tars_api_key_input.change(fn=update_ui_tars_api_key, inputs=[ui_tars_api_key_input, state], outputs=None)
+    ui_tars_api_key_input.submit(fn=update_ui_tars_api_key, inputs=[ui_tars_api_key_input, state], outputs=None)
 
     # chat_input.submit(process_input, [chat_input, state], chatbot)
     submit_button.click(process_input, [chat_input, state], chatbot)
