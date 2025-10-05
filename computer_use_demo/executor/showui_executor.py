@@ -120,17 +120,31 @@ class ShowUIExecutor:
         return tool_result_content
     
     
-    def _format_actor_output(self, action_output: str|dict) -> Dict[str, Any]:
-        if type(action_output) == dict:
+    def _format_actor_output(self, action_output: str | dict) -> Dict[str, Any] | None:
+        if isinstance(action_output, dict):
             return action_output
-        else:
-            try:
-                action_output = action_output.replace("'", "\"")
-                action_dict = ast.literal_eval(action_output)
-                return action_dict
-            except Exception as e:
-                print(f"Error parsing action output: {e}")
-                return None
+
+        if not isinstance(action_output, str):
+            print(f"Unexpected action output type: {type(action_output)}")
+            return None
+
+        text_output = action_output.strip()
+
+        if not text_output:
+            print("Empty action output received from ShowUI actor.")
+            return None
+
+        try:
+            return json.loads(text_output)
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            sanitized_output = self._json_literals_to_python(text_output)
+            return ast.literal_eval(sanitized_output)
+        except (ValueError, SyntaxError) as exc:
+            print(f"Error parsing action output: {exc}")
+            return None
     
 
     def _parse_showui_output(self, output_text: str) -> Union[List[Dict[str, Any]], None]:
@@ -165,7 +179,6 @@ class ShowUIExecutor:
 
             # refine key: value pairs, mapping to the Anthropic's format
             refined_output: list[Dict[str, Any]] = []
-
             stop_encountered = False
 
             for action_item in parsed_output:
