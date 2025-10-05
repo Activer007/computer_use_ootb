@@ -78,9 +78,14 @@ class ShowUIExecutor:
                 self.output_callback(f"{colorful_text_showui}:\n{action}", sender="bot")
                 print("Converted Action:", action)
                 
-                sim_content_block = BetaToolUseBlock(id=f'toolu_{uuid.uuid4()}',
-                                        input={'action': action["action"], 'text': action["text"], 'coordinate': action["coordinate"]},
-                                        name='computer', type='tool_use')
+                tool_input: dict[str, Any] = dict(action)
+
+                sim_content_block = BetaToolUseBlock(
+                    id=f'toolu_{uuid.uuid4()}',
+                    input=tool_input,
+                    name='computer',
+                    type='tool_use',
+                )
                 
                 # update messages
                 new_message = {
