@@ -34,7 +34,7 @@ class ShowUIExecutor:
         self.tool_collection = ToolCollection(
             ComputerTool(selected_screen=selected_screen, is_scaling=False)
         )
-        
+
         self.supported_action_type={
             # "showui_action": "anthropic_tool_action"
             "CLICK": 'key',  # TBD
@@ -43,6 +43,8 @@ class ShowUIExecutor:
             "ESC": "key",
             "ESCAPE": "key",
             "PRESS":  "key",
+            "HOVER": "key",
+            "SCROLL": "key",
         }
 
     def __call__(self, response: str, messages: list[BetaMessageParam]):
@@ -144,39 +146,72 @@ class ShowUIExecutor:
 
             # refine key: value pairs, mapping to the Anthropic's format
             refined_output = []
-            
+
+            screen_left, screen_top, screen_right, screen_bottom = self.screen_bbox
+            screen_width = screen_right - screen_left
+            screen_height = screen_bottom - screen_top
+
+            def _convert_position(position: Any, source: str | None) -> tuple[int, int]:
+                if position is None:
+                    raise ValueError("Action requires a position but none was provided.")
+
+                if not isinstance(position, (list, tuple)) or len(position) != 2:
+                    raise ValueError(f"Unexpected position format: {position}")
+
+                raw_x, raw_y = position
+
+                try:
+                    x_value = float(raw_x)
+                    y_value = float(raw_y)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Position contains non-numeric values: {position}") from exc
+
+                source_tag = (source or "").lower()
+                is_absolute_coordinate = source_tag == "ui-tars"
+
+                if not is_absolute_coordinate:
+                    if abs(x_value) > 1 or abs(y_value) > 1:
+                        is_absolute_coordinate = True
+
+                if is_absolute_coordinate:
+                    converted_x = int(round(x_value + screen_left))
+                    converted_y = int(round(y_value + screen_top))
+                else:
+                    converted_x = int(round(x_value * screen_width + screen_left))
+                    converted_y = int(round(y_value * screen_height + screen_top))
+
+                return converted_x, converted_y
+
             for action_item in parsed_output:
-                
+
                 print("Action Item:", action_item)
                 # sometime showui returns lower case action names
                 action_item["action"] = action_item["action"].upper()
-                
+
                 if action_item["action"] not in self.supported_action_type:
                     raise ValueError(f"Action {action_item['action']} not supported. Check the output from ShowUI: {output_text}")
                     # continue
-                
+
                 elif action_item["action"] == "CLICK":  # 1. click -> mouse_move + left_click
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
+                    position = _convert_position(action_item.get("position"), action_item.get("source"))
+                    action_item["position"] = position
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": position})
                     refined_output.append({"action": "left_click", "text": None, "coordinate": None})
-                
+
                 elif action_item["action"] == "INPUT":  # 2. input -> type
                     refined_output.append({"action": "type", "text": action_item["value"], "coordinate": None})
-                
+
                 elif action_item["action"] == "ENTER":  # 3. enter -> key, enter
                     refined_output.append({"action": "key", "text": "Enter", "coordinate": None})
-                
+
                 elif action_item["action"] == "ESC" or action_item["action"] == "ESCAPE":  # 4. enter -> key, enter
                     refined_output.append({"action": "key", "text": "Escape", "coordinate": None})
-                    
+
                 elif action_item["action"] == "HOVER":  # 5. hover -> mouse_move
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
-                    
+                    position = _convert_position(action_item.get("position"), action_item.get("source"))
+                    action_item["position"] = position
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": position})
+
                 elif action_item["action"] == "SCROLL":  # 6. scroll -> key: pagedown
                     if action_item["value"] == "up":
                         refined_output.append({"action": "key", "text": "pageup", "coordinate": None})
@@ -186,10 +221,9 @@ class ShowUIExecutor:
                         raise ValueError(f"Scroll direction {action_item['value']} not supported.")
 
                 elif action_item["action"] == "PRESS":  # 7. press
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
+                    position = _convert_position(action_item.get("position"), action_item.get("source"))
+                    action_item["position"] = position
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": position})
                     refined_output.append({"action": "left_press", "text": None, "coordinate": None})
 
             return refined_output

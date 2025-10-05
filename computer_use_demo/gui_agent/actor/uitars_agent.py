@@ -108,7 +108,8 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
     output_dict = {
         "action": None,
         "value": None,
-        "position": None
+        "position": None,
+        "source": "UI-TARS",
     }
 
     # 1) CLICK(...) e.g. click(start_box='(153,97)')
