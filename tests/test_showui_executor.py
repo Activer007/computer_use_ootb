@@ -64,7 +64,7 @@ def test_parse_showui_normalized_coordinates(executor):
     actions = executor._parse_showui_output(output)
 
     assert actions[0]["action"] == "mouse_move"
-    assert actions[0]["coordinate"] == (600, 700)
+    assert actions[0]["coordinate"] == (500, 500)
     assert actions[1]["action"] == "left_click"
 
 

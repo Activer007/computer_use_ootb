@@ -177,8 +177,8 @@ class ShowUIExecutor:
                     converted_x = int(round(x_value + screen_left))
                     converted_y = int(round(y_value + screen_top))
                 else:
-                    converted_x = int(round(x_value * screen_width + screen_left))
-                    converted_y = int(round(y_value * screen_height + screen_top))
+                    converted_x = int(round(x_value * screen_width))
+                    converted_y = int(round(y_value * screen_height))
 
                 return converted_x, converted_y
 
