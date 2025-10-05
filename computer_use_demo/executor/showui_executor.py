@@ -35,14 +35,18 @@ class ShowUIExecutor:
             ComputerTool(selected_screen=selected_screen, is_scaling=False)
         )
         
-        self.supported_action_type={
+        self.supported_action_type = {
             # "showui_action": "anthropic_tool_action"
-            "CLICK": 'key',  # TBD
-            "INPUT": "key",
-            "ENTER": "key",  # TBD
+            "CLICK": "mouse",
+            "HOVER": "mouse",
+            "INPUT": "type",
+            "ENTER": "key",
             "ESC": "key",
             "ESCAPE": "key",
-            "PRESS":  "key",
+            "PRESS": "mouse",
+            "SCROLL": "scroll",
+            "HOTKEY": "key",
+            "STOP": None,
         }
 
     def __call__(self, response: str, messages: list[BetaMessageParam]):
@@ -69,9 +73,21 @@ class ShowUIExecutor:
                 self.output_callback(f"{colorful_text_showui}:\n{action}", sender="bot")
                 print("Converted Action:", action)
                 
-                sim_content_block = BetaToolUseBlock(id=f'toolu_{uuid.uuid4()}',
-                                        input={'action': action["action"], 'text': action["text"], 'coordinate': action["coordinate"]},
-                                        name='computer', type='tool_use')
+                tool_input: Dict[str, Any] = {
+                    "action": action["action"],
+                    "text": action.get("text"),
+                    "coordinate": action.get("coordinate"),
+                }
+
+                if "scroll_direction" in action:
+                    tool_input["scroll_direction"] = action["scroll_direction"]
+
+                sim_content_block = BetaToolUseBlock(
+                    id=f'toolu_{uuid.uuid4()}',
+                    input=tool_input,
+                    name='computer',
+                    type='tool_use'
+                )
                 
                 # update messages
                 new_message = {
@@ -145,16 +161,24 @@ class ShowUIExecutor:
             # refine key: value pairs, mapping to the Anthropic's format
             refined_output = []
             
+            stop_encountered = False
+
             for action_item in parsed_output:
-                
+
                 print("Action Item:", action_item)
                 # sometime showui returns lower case action names
                 action_item["action"] = action_item["action"].upper()
-                
+
                 if action_item["action"] not in self.supported_action_type:
-                    raise ValueError(f"Action {action_item['action']} not supported. Check the output from ShowUI: {output_text}")
-                    # continue
-                
+                    raise ValueError(
+                        f"Action {action_item['action']} not supported. Check the output from ShowUI: {output_text}"
+                    )
+
+                if action_item["action"] == "STOP":
+                    stop_encountered = True
+                    # Stop indicates that there are no more actions to execute.
+                    break
+
                 elif action_item["action"] == "CLICK":  # 1. click -> mouse_move + left_click
                     x, y = action_item["position"]
                     action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
@@ -177,13 +201,32 @@ class ShowUIExecutor:
                                                int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
                     refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
                     
-                elif action_item["action"] == "SCROLL":  # 6. scroll -> key: pagedown
-                    if action_item["value"] == "up":
-                        refined_output.append({"action": "key", "text": "pageup", "coordinate": None})
-                    elif action_item["value"] == "down":
-                        refined_output.append({"action": "key", "text": "pagedown", "coordinate": None})
-                    else:
-                        raise ValueError(f"Scroll direction {action_item['value']} not supported.")
+                elif action_item["action"] == "SCROLL":  # 6. scroll -> scroll tool
+                    direction = (action_item.get("value") or "down").lower()
+                    if direction not in {"up", "down", "left", "right"}:
+                        raise ValueError(f"Scroll direction {direction} not supported.")
+
+                    payload: Dict[str, Any] = {
+                        "action": "scroll",
+                        "text": None,
+                        "coordinate": None,
+                        "scroll_direction": direction,
+                    }
+
+                    if action_item.get("position") is not None:
+                        x, y = action_item["position"]
+                        payload["coordinate"] = (
+                            int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
+                            int(y * (self.screen_bbox[3] - self.screen_bbox[1])),
+                        )
+
+                    refined_output.append(payload)
+
+                elif action_item["action"] == "HOTKEY":
+                    key_value = action_item.get("value")
+                    if not key_value:
+                        continue
+                    refined_output.append({"action": "key", "text": key_value, "coordinate": None})
 
                 elif action_item["action"] == "PRESS":  # 7. press
                     x, y = action_item["position"]
@@ -191,6 +234,9 @@ class ShowUIExecutor:
                                                int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
                     refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
                     refined_output.append({"action": "left_press", "text": None, "coordinate": None})
+
+            if stop_encountered:
+                return refined_output
 
             return refined_output
 
