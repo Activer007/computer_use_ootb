@@ -23,6 +23,7 @@ class APIProvider(StrEnum):
     VERTEX = "vertex"
     OPENAI = "openai"
     QWEN = "qwen"
+    GEMINI = "gemini"
     SSH = "ssh"
 
 
@@ -32,14 +33,17 @@ PROVIDER_TO_DEFAULT_MODEL_NAME: dict[APIProvider, str] = {
     APIProvider.VERTEX: "claude-3-5-sonnet-v2@20241022",
     APIProvider.OPENAI: "gpt-4o",
     APIProvider.QWEN: "qwen2vl",
+    APIProvider.GEMINI: "gemini-1.5-flash",
     APIProvider.SSH: "qwen2-vl-2b",
 }
 
 PLANNER_MODEL_CHOICES_MAPPING = {
     "claude-3-5-sonnet-20241022": "claude-3-5-sonnet-20241022",
     "gpt-4o": "gpt-4o",
-    "gpt-4o-mini": "gpt-4o-mini", 
+    "gpt-4o-mini": "gpt-4o-mini",
     "qwen2-vl-max": "qwen2-vl-max",
+    "gemini-1.5-flash": "gemini-1.5-flash",
+    "gemini-1.5-pro": "gemini-1.5-pro",
     "qwen2-vl-2b (local)": "qwen2-vl-2b-instruct",
     "qwen2-vl-7b (local)": "qwen2-vl-7b-instruct",
     "qwen2.5-vl-3b (local)": "qwen2.5-vl-3b-instruct",
@@ -107,7 +111,13 @@ def sampling_loop_sync(
 
         loop_mode = "unified"
 
-    elif planner_model in ["gpt-4o", "gpt-4o-mini", "qwen2-vl-max"]:
+    elif planner_model in [
+        "gpt-4o",
+        "gpt-4o-mini",
+        "qwen2-vl-max",
+        "gemini-1.5-flash",
+        "gemini-1.5-pro",
+    ]:
         
         from computer_use_demo.gui_agent.planner.api_vlm_planner import APIVLMPlanner
 
