@@ -103,6 +103,7 @@ python app.py
 $env:ANTHROPIC_API_KEY="sk-xxxxx" (替换为您的密钥)
 $env:QWEN_API_KEY="sk-xxxxx"
 $env:OPENAI_API_KEY="sk-xxxxx"
+$env:GEMINI_API_KEY="sk-xxxxx"
 ```
 
 > 在 macOS/Linux 中，将上述命令中的 $env:ANTHROPIC_API_KEY 替换为 export ANTHROPIC_API_KEY 即可。

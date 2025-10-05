@@ -109,6 +109,7 @@ If you successfully start the interface, you will see two URLs in the terminal:
 > $env:ANTHROPIC_API_KEY="sk-xxxxx" (Replace with your own key)
 > $env:QWEN_API_KEY="sk-xxxxx"
 > $env:OPENAI_API_KEY="sk-xxxxx"
+> $env:GEMINI_API_KEY="sk-xxxxx"
 > ```
 > On macOS/Linux, replace `$env:ANTHROPIC_API_KEY` with `export ANTHROPIC_API_KEY` in the above command. 
 
