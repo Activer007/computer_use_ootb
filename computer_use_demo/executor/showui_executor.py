@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import json
 from typing import Any, Dict, cast, List, Union
 from collections.abc import Callable
 import uuid
@@ -119,7 +120,6 @@ class ShowUIExecutor:
     def _parse_showui_output(self, output_text: str) -> Union[List[Dict[str, Any]], None]:
         try:
             output_text = output_text.strip()
-            output_text = output_text.replace("null", "None").replace("true", "True").replace("false", "False")
             
             # process single dictionary
             if output_text.startswith("{") and output_text.endswith("}"):
@@ -131,7 +131,11 @@ class ShowUIExecutor:
 
             print("Output Text:", output_text)
 
-            parsed_output = ast.literal_eval(output_text)
+            try:
+                parsed_output = json.loads(output_text)
+            except json.JSONDecodeError:
+                sanitized_output = self._json_literals_to_python(output_text)
+                parsed_output = ast.literal_eval(sanitized_output)
 
             print("Parsed Output:", parsed_output)
 
@@ -288,6 +292,58 @@ class ShowUIExecutor:
                 raise RuntimeError("Failed to get screen resolution on Linux.")
         
         return bbox
+
+
+    def _json_literals_to_python(self, text: str) -> str:
+        """Convert JSON literal tokens to Python equivalents without touching quoted strings."""
+
+        def is_escaped(idx: int) -> bool:
+            backslash_count = 0
+            j = idx - 1
+            while j >= 0 and text[j] == "\\":
+                backslash_count += 1
+                j -= 1
+            return backslash_count % 2 == 1
+
+        result: list[str] = []
+        in_single_quote = False
+        in_double_quote = False
+        i = 0
+        length = len(text)
+
+        while i < length:
+            ch = text[i]
+
+            if ch == "'" and not in_double_quote and not is_escaped(i):
+                in_single_quote = not in_single_quote
+                result.append(ch)
+                i += 1
+                continue
+
+            if ch == '"' and not in_single_quote and not is_escaped(i):
+                in_double_quote = not in_double_quote
+                result.append(ch)
+                i += 1
+                continue
+
+            if not in_single_quote and not in_double_quote:
+                if text.startswith("null", i):
+                    result.append("None")
+                    i += 4
+                    continue
+                if text.startswith("true", i):
+                    result.append("True")
+                    i += 4
+                    continue
+                if text.startswith("false", i):
+                    result.append("False")
+                    i += 5
+                    continue
+
+            result.append(ch)
+            i += 1
+
+        return ''.join(result)
 
 
 
