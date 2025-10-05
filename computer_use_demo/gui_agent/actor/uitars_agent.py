@@ -47,6 +47,7 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
         
         # take screenshot
         screenshot, screenshot_path = get_screenshot(selected_screen=self.selected_screen, resize=True, target_width=1920, target_height=1080)
+        screenshot_width, screenshot_height = screenshot.size
         screenshot_path = str(screenshot_path)
         screenshot_base64 = encode_image(screenshot_path)
 
@@ -67,7 +68,10 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
             )
         
         ui_tars_action = response.choices[0].message.content
-        converted_action = convert_ui_tars_action_to_json(ui_tars_action)
+        converted_action = convert_ui_tars_action_to_json(
+            ui_tars_action,
+            screenshot_size=(screenshot_width, screenshot_height),
+        )
         response = str(converted_action)
 
         response = {'content': response, 'role': 'assistant'}
@@ -75,7 +79,7 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 
 
 
-def convert_ui_tars_action_to_json(action_str: str) -> str:
+def convert_ui_tars_action_to_json(action_str: str, screenshot_size: tuple[int, int] | None = None) -> str:
     """
     Converts an action line such as:
       Action: click(start_box='(153,97)')
@@ -83,7 +87,7 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
       {
         "action": "CLICK",
         "value": null,
-        "position": [153, 97]
+        "position": [0.0796, 0.0898]
       }
     """
     
@@ -95,12 +99,14 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
     # Mappings from old action names to the new action schema
     ACTION_MAP = {
         "click": "CLICK",
+        "hover": "HOVER",
         "type": "INPUT",
         "scroll": "SCROLL",
         "wait": "STOP",        # TODO: deal with "wait()"
         "finished": "STOP",
         "call_user": "STOP",
         "hotkey": "HOTKEY",    # We break down the actual key below (Enter, Esc, etc.)
+        "press": "PRESS",
     }
 
     # Prepare a structure for the final JSON
@@ -111,12 +117,24 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
         "position": None
     }
 
-    # 1) CLICK(...) e.g. click(start_box='(153,97)')
-    match_click = re.match(r"^click\(start_box='\(?(\d+),\s*(\d+)\)?'\)$", action_str)
-    if match_click:
-        x, y = match_click.groups()
-        output_dict["action"] = ACTION_MAP["click"]
-        output_dict["position"] = [int(x), int(y)]
+    def _normalize_position(raw_x: int, raw_y: int) -> list[float] | list[int]:
+        if not screenshot_size:
+            return [int(raw_x), int(raw_y)]
+
+        width, height = screenshot_size
+        if width <= 0 or height <= 0:
+            return [int(raw_x), int(raw_y)]
+
+        x_norm = max(0.0, min(1.0, int(raw_x) / width))
+        y_norm = max(0.0, min(1.0, int(raw_y) / height))
+        return [x_norm, y_norm]
+
+    # 1) CLICK/HOVER/PRESS(...) e.g. click(start_box='(153,97)')
+    match_position = re.match(r"^(click|hover|press)\(start_box='\(?(\d+),\s*(\d+)\)?'\)$", action_str)
+    if match_position:
+        action_name, x, y = match_position.groups()
+        output_dict["action"] = ACTION_MAP[action_name]
+        output_dict["position"] = _normalize_position(int(x), int(y))
         return json.dumps(output_dict)
 
     # 2) HOTKEY(...) e.g. hotkey(key='Enter')

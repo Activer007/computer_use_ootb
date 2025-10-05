@@ -119,6 +119,7 @@ class ShowUIExecutor:
     def _parse_showui_output(self, output_text: str) -> Union[List[Dict[str, Any]], None]:
         try:
             output_text = output_text.strip()
+            output_text = output_text.replace("null", "None").replace("true", "True").replace("false", "False")
             
             # process single dictionary
             if output_text.startswith("{") and output_text.endswith("}"):
@@ -156,9 +157,7 @@ class ShowUIExecutor:
                     # continue
                 
                 elif action_item["action"] == "CLICK":  # 1. click -> mouse_move + left_click
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
+                    action_item["position"] = self._to_screen_coordinates(action_item["position"])
                     refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
                     refined_output.append({"action": "left_click", "text": None, "coordinate": None})
                 
@@ -172,9 +171,7 @@ class ShowUIExecutor:
                     refined_output.append({"action": "key", "text": "Escape", "coordinate": None})
                     
                 elif action_item["action"] == "HOVER":  # 5. hover -> mouse_move
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
+                    action_item["position"] = self._to_screen_coordinates(action_item["position"])
                     refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
                     
                 elif action_item["action"] == "SCROLL":  # 6. scroll -> key: pagedown
@@ -186,9 +183,7 @@ class ShowUIExecutor:
                         raise ValueError(f"Scroll direction {action_item['value']} not supported.")
 
                 elif action_item["action"] == "PRESS":  # 7. press
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
+                    action_item["position"] = self._to_screen_coordinates(action_item["position"])
                     refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
                     refined_output.append({"action": "left_press", "text": None, "coordinate": None})
 
@@ -197,6 +192,33 @@ class ShowUIExecutor:
         except Exception as e:
             print(f"Error parsing output: {e}")
             return None
+
+    def _to_screen_coordinates(self, position):
+        if position is None:
+            raise ValueError("Position is required for pointer actions.")
+
+        if not isinstance(position, (list, tuple)) or len(position) != 2:
+            raise ValueError(f"Unexpected position format: {position}")
+
+        x, y = position
+        width = self.screen_bbox[2] - self.screen_bbox[0]
+        height = self.screen_bbox[3] - self.screen_bbox[1]
+
+        if width <= 0 or height <= 0:
+            raise ValueError("Invalid screen bounds returned from monitor lookup.")
+
+        if (isinstance(x, (int, float)) and isinstance(y, (int, float)) and
+                (x > 1 or y > 1)):
+            x_px = int(round(x))
+            y_px = int(round(y))
+        else:
+            x_px = int(round(max(0.0, min(1.0, float(x))) * (width - 1)))
+            y_px = int(round(max(0.0, min(1.0, float(y))) * (height - 1)))
+
+        x_px = min(max(x_px, 0), width - 1)
+        y_px = min(max(y_px, 0), height - 1)
+
+        return x_px, y_px
         
 
     def _get_screen_resolution(self):
