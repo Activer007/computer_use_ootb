@@ -74,7 +74,7 @@ def test_parse_ui_tars_absolute_coordinates(executor):
     ])
     actions = executor._parse_showui_output(output)
 
-    assert actions[0]["coordinate"] == (250, 450)
+    assert actions[0]["coordinate"] == (150, 250)
 
 
 def test_parse_absolute_coordinates_without_source_flag(executor):

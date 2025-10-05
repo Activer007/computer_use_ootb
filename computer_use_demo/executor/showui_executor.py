@@ -167,13 +167,17 @@ class ShowUIExecutor:
                     raise ValueError(f"Position contains non-numeric values: {position}") from exc
 
                 source_tag = (source or "").lower()
-                is_absolute_coordinate = source_tag == "ui-tars"
+                is_ui_tars_coordinate = source_tag == "ui-tars"
+                is_absolute_coordinate = is_ui_tars_coordinate
 
                 if not is_absolute_coordinate:
                     if abs(x_value) > 1 or abs(y_value) > 1:
                         is_absolute_coordinate = True
 
-                if is_absolute_coordinate:
+                if is_ui_tars_coordinate:
+                    converted_x = int(round(x_value))
+                    converted_y = int(round(y_value))
+                elif is_absolute_coordinate:
                     converted_x = int(round(x_value + screen_left))
                     converted_y = int(round(y_value + screen_top))
                 else:
