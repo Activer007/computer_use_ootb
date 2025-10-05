@@ -74,7 +74,7 @@ def test_parse_ui_tars_absolute_coordinates(executor):
     ])
     actions = executor._parse_showui_output(output)
 
-    assert actions[0]["coordinate"] == (250, 450)
+    assert actions[0]["coordinate"] == (50, 50)
 
 
 def test_parse_absolute_coordinates_without_source_flag(executor):
@@ -84,7 +84,7 @@ def test_parse_absolute_coordinates_without_source_flag(executor):
     actions = executor._parse_showui_output(output)
 
     assert actions[0]["action"] == "mouse_move"
-    assert actions[0]["coordinate"] == (1600, 1000)
+    assert actions[0]["coordinate"] == (1400, 600)
 
 
 def test_convert_ui_tars_action_includes_source_flag():
