@@ -71,3 +71,43 @@ def test_scroll_includes_horizontal_directions(showui_executor):
             "scroll_direction": "left",
         }
     ]
+
+
+def test_click_with_absolute_coordinates_skips_scaling(showui_executor):
+    parsed = showui_executor._parse_showui_output(
+        '[{"action": "click", "position": [150, 40]}]'
+    )
+
+    assert parsed == [
+        {"action": "mouse_move", "text": None, "coordinate": (150, 40)},
+        {"action": "left_click", "text": None, "coordinate": None},
+    ]
+
+
+def test_hover_respects_position_markers_from_ui_tars(showui_executor):
+    parsed = showui_executor._parse_showui_output(
+        '[{"action": "hover", "position": [321, 222], "position_mode": "absolute", "position_source": "ui-tars"}]'
+    )
+
+    assert parsed == [
+        {"action": "mouse_move", "text": None, "coordinate": (321, 222)}
+    ]
+
+
+def test_absolute_coordinates_shifted_by_screen_offset():
+    with patch.object(ShowUIExecutor, "_get_screen_resolution", return_value=(100, 50, 500, 450)):
+        with patch("computer_use_demo.executor.showui_executor.ComputerTool", DummyComputerTool):
+            executor = ShowUIExecutor(
+                output_callback=lambda *_: None,
+                tool_output_callback=lambda *_: None,
+                selected_screen=0,
+            )
+
+    parsed = executor._parse_showui_output(
+        '[{"action": "click", "position": [150, 40]}]'
+    )
+
+    assert parsed == [
+        {"action": "mouse_move", "text": None, "coordinate": (250, 90)},
+        {"action": "left_click", "text": None, "coordinate": None},
+    ]

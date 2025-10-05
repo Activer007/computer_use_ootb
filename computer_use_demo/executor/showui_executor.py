@@ -180,27 +180,23 @@ class ShowUIExecutor:
                     break
 
                 elif action_item["action"] == "CLICK":  # 1. click -> mouse_move + left_click
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
+                    coordinate = self._resolve_coordinate(action_item)
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
                     refined_output.append({"action": "left_click", "text": None, "coordinate": None})
-                
+
                 elif action_item["action"] == "INPUT":  # 2. input -> type
                     refined_output.append({"action": "type", "text": action_item["value"], "coordinate": None})
-                
+
                 elif action_item["action"] == "ENTER":  # 3. enter -> key, enter
                     refined_output.append({"action": "key", "text": "Enter", "coordinate": None})
-                
+
                 elif action_item["action"] == "ESC" or action_item["action"] == "ESCAPE":  # 4. enter -> key, enter
                     refined_output.append({"action": "key", "text": "Escape", "coordinate": None})
-                    
+
                 elif action_item["action"] == "HOVER":  # 5. hover -> mouse_move
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
-                    
+                    coordinate = self._resolve_coordinate(action_item)
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
+
                 elif action_item["action"] == "SCROLL":  # 6. scroll -> scroll tool
                     direction = (action_item.get("value") or "down").lower()
                     if direction not in {"up", "down", "left", "right"}:
@@ -214,11 +210,7 @@ class ShowUIExecutor:
                     }
 
                     if action_item.get("position") is not None:
-                        x, y = action_item["position"]
-                        payload["coordinate"] = (
-                            int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                            int(y * (self.screen_bbox[3] - self.screen_bbox[1])),
-                        )
+                        payload["coordinate"] = self._resolve_coordinate(action_item)
 
                     refined_output.append(payload)
 
@@ -229,10 +221,8 @@ class ShowUIExecutor:
                     refined_output.append({"action": "key", "text": key_value, "coordinate": None})
 
                 elif action_item["action"] == "PRESS":  # 7. press
-                    x, y = action_item["position"]
-                    action_item["position"] = (int(x * (self.screen_bbox[2] - self.screen_bbox[0])),
-                                               int(y * (self.screen_bbox[3] - self.screen_bbox[1])))
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": tuple(action_item["position"])})
+                    coordinate = self._resolve_coordinate(action_item)
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
                     refined_output.append({"action": "left_press", "text": None, "coordinate": None})
 
             if stop_encountered:
@@ -243,6 +233,42 @@ class ShowUIExecutor:
         except Exception as e:
             print(f"Error parsing output: {e}")
             return None
+
+    def _resolve_coordinate(self, action_item: Dict[str, Any]) -> tuple[int, int]:
+        position = action_item.get("position")
+        if position is None:
+            raise ValueError(f"Action {action_item['action']} requires a position but none was provided.")
+
+        if not isinstance(position, (list, tuple)) or len(position) != 2:
+            raise ValueError(f"Invalid position payload: {position}")
+
+        x_raw, y_raw = position
+
+        try:
+            x_value = float(x_raw)
+            y_value = float(y_raw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Position values must be numeric: {position}") from exc
+
+        # Determine if the position is already in absolute pixel coordinates.
+        position_mode = (action_item.get("position_mode") or action_item.get("position_source") or "").lower()
+        is_absolute = position_mode in {"absolute", "ui-tars", "ui_tars"} or bool(action_item.get("is_absolute"))
+
+        if not is_absolute and (x_value > 1 or y_value > 1):
+            is_absolute = True
+
+        x_offset = self.screen_bbox[0]
+        y_offset = self.screen_bbox[1]
+        width = self.screen_bbox[2] - self.screen_bbox[0]
+        height = self.screen_bbox[3] - self.screen_bbox[1]
+
+        if is_absolute:
+            return int(round(x_value)) + x_offset, int(round(y_value)) + y_offset
+
+        return (
+            int(round(x_value * width)) + x_offset,
+            int(round(y_value * height)) + y_offset,
+        )
         
 
     def _get_screen_resolution(self):

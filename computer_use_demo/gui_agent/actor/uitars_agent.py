@@ -108,7 +108,8 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
     output_dict = {
         "action": None,
         "value": None,
-        "position": None
+        "position": None,
+        "position_source": "ui-tars",
     }
 
     # 1) CLICK(...) e.g. click(start_box='(153,97)')
@@ -117,6 +118,7 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
         x, y = match_click.groups()
         output_dict["action"] = ACTION_MAP["click"]
         output_dict["position"] = [int(x), int(y)]
+        output_dict["position_mode"] = "absolute"
         return json.dumps(output_dict)
 
     # 2) HOTKEY(...) e.g. hotkey(key='Enter')
