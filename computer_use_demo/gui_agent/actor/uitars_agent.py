@@ -125,8 +125,11 @@ def convert_ui_tars_action_to_json(action_str: str, screenshot_size: tuple[int, 
         if width <= 0 or height <= 0:
             return [int(raw_x), int(raw_y)]
 
-        x_norm = max(0.0, min(1.0, int(raw_x) / width))
-        y_norm = max(0.0, min(1.0, int(raw_y) / height))
+        clamped_x = max(0, min(int(raw_x), width - 1))
+        clamped_y = max(0, min(int(raw_y), height - 1))
+
+        x_norm = clamped_x / width
+        y_norm = clamped_y / height
         return [x_norm, y_norm]
 
     # 1) CLICK/HOVER/PRESS(...) e.g. click(start_box='(153,97)')
