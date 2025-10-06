@@ -70,6 +70,7 @@ def sampling_loop_sync(
     selected_screen: int = 0,
     showui_max_pixels: int = 1344,
     showui_awq_4bit: bool = False,
+    showui_split: str = "desktop",
     ui_tars_url: str = "",
     ui_tars_api_key: str = ""
 ):
@@ -188,19 +189,20 @@ def sampling_loop_sync(
         logger.info(f"Actor model {actor_model} inited on device: {device}.")
 
         actor = ShowUIActor(
-            model_path=showui_model_path,  
-            device=device,  
-            split='desktop',  # 'desktop' or 'phone'
+            model_path=showui_model_path,
+            device=device,
+            split=showui_split,
             selected_screen=selected_screen,
             output_callback=output_callback,
             max_pixels=showui_max_pixels,
             awq_4bit=showui_awq_4bit
         )
-        
+
         executor = ShowUIExecutor(
             output_callback=output_callback,
             tool_output_callback=tool_output_callback,
-            selected_screen=selected_screen
+            selected_screen=selected_screen,
+            split=showui_split
         )
 
     elif actor_model == "UI-TARS":
@@ -218,7 +220,8 @@ def sampling_loop_sync(
         executor = ShowUIExecutor(
             output_callback=output_callback,
             tool_output_callback=tool_output_callback,
-            selected_screen=selected_screen
+            selected_screen=selected_screen,
+            split=showui_split
         )
         
     elif actor_model == "claude-3-5-sonnet-20241022":

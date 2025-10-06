@@ -182,6 +182,33 @@ def test_ui_tars_normalized_positions_are_scaled(showui_executor):
     ]
 
 
+def test_phone_swipe_maps_to_drag():
+    metadata = {
+        "selected_screen": 0,
+        "raw_size": (200, 400),
+        "processed_size": (1080, 1920),
+        "crop_box": (20, 0, 180, 400),
+    }
+    with patch.object(ShowUIExecutor, "_get_screen_resolution", return_value=(0, 0, 200, 400)):
+        with patch("computer_use_demo.executor.showui_executor.ComputerTool", DummyComputerTool):
+            executor = ShowUIExecutor(
+                output_callback=lambda *_: None,
+                tool_output_callback=lambda *_: None,
+                selected_screen=0,
+                split="phone",
+            )
+
+    with patch("computer_use_demo.executor.showui_executor.get_last_screenshot_info", return_value=metadata):
+        parsed = executor._parse_showui_output(
+            '[{"action": "swipe", "position": [[0.1, 0.2], [0.9, 0.8]]}]'
+        )
+
+    assert parsed == [
+        {"action": "mouse_move", "text": None, "coordinate": (36, 80)},
+        {"action": "left_click_drag", "text": None, "coordinate": (164, 320)},
+    ]
+
+
 def test_convert_ui_tars_action_includes_source_flag_and_normalizes():
     json_payload = convert_ui_tars_action_to_json(
         "Action: click(start_box='(960,540)')",

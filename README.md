@@ -132,6 +132,14 @@ Then, enable the quantized setting in the 'ShowUI Advanced Settings' dropdown me
 
 Besides, we also provide a slider to quickly adjust the `max_pixel` parameter in the ShowUI model. This controls the visual input size of the model and greatly affects the memory and inference speed.
 
+### ShowUI Phone Split & Mobile Deployment
+
+- **Enable phone mode**: In the Gradio Settings panel select **ShowUI Split → `phone`** before starting a run. The actor/executor pipeline crops the center of your selected monitor to a 9:16 viewport and remaps ShowUI's touch gestures (tap, swipe, answer) onto desktop mouse/keyboard events automatically.
+- **Recommended resolution**: Keep the mobile surface (emulator, scrcpy mirror, or remote desktop window) centered with at least **1080×1920** visible pixels. Anything outside the tall viewport is ignored after cropping, so make sure the phone window stays unobstructed.
+- **Screenshot hints**: Phone screenshots are stored under `./tmp/outputs/` after cropping. Inspect them to verify framing or share reproducible states when debugging.
+- **Example tasks**: Try "Open Settings and enable Wi-Fi", "Swipe through the gallery and favorite the first photo", or "Compose a short reply in the messaging app" to validate gesture coverage.
+- **Remote control access**: The default Gradio port is **7860**. When visiting the link from a mobile browser, disable desktop mode and allow screen rotation so the streamed viewport matches your device orientation. Public links (`https://*.gradio.live`) require keeping the browser tab active to maintain the WebSocket session.
+
 ## 📊 GUI Agent Model Zoo
 
 Now, OOTB supports customizing the GUI Agent via the following models:
