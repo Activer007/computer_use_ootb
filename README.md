@@ -79,18 +79,52 @@ The assistant can:
 - create `.env` or `api_keys.json` files with placeholders so you can add API keys later;
 - print the next steps (e.g., `python app.py`, default port `7860`).
 
-You can rerun the script at any time—every step is optional and idempotent.
+You can rerun the script at any time—every step is optional and idempotent. If you prefer manual setup, continue with Sections 3.1–3.4 below.
 
-### 3. Manual / Advanced Options (if you skipped the assistant)
+### 3. Manual Setup (if you skipped the assistant)
 
-- Install dependencies manually:
-    ```bash
-    pip install -r requirements.txt
+#### 3.1 Install Dependencies 🔧
+
+If you skipped the assistant, install the Python requirements yourself:
+
+```bash
+pip install -r requirements.txt
+```
+
+#### 3.2 (Optional) Get Prepared for **<span style="color:rgb(106, 158, 210)">S</span><span style="color:rgb(111, 163, 82)">h</span><span style="color:rgb(209, 100, 94)">o</span><span style="color:rgb(238, 171, 106)">w</span>UI** Local-Run
+
+1. Download all files of the ShowUI-2B model via the following command. Ensure the `ShowUI-2B` folder is under the `computer_use_ootb` folder.
+
+    ```python
+    python install_tools/install_showui.py
     ```
-- Download ShowUI-2B weights: `python install_tools/install_showui.py`
-- Download ShowUI-2B AWQ 4-bit (CUDA only): `python install_tools/install_showui-awq-4bit.py`
-- Follow [UI-TARS deployment](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#cloud-deployment) guides and sanity-check with `python install_tools/test_ui-tars_server.py`
-- Run a local Qwen planner server (advanced): `python computer_use_demo/remote_inference.py --host 0.0.0.0 --port 8000`
+
+2. (Optional, CUDA only) Download the AWQ 4-bit weights:
+
+    ```python
+    python install_tools/install_showui-awq-4bit.py
+    ```
+
+3. Make sure to install the correct GPU version of PyTorch (CUDA, MPS, etc.) on your machine. See [install guide and verification](https://pytorch.org/get-started/locally/).
+
+4. Get API Keys for [GPT-4o](https://platform.openai.com/docs/quickstart) or [Qwen-VL](https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key). For mainland China users, Qwen API free trial for first 1 mil tokens is [available](https://help.aliyun.com/zh/dashscope/developer-reference/tongyi-qianwen-vl-plus-api).
+
+#### 3.3 (Optional) Get Prepared for **UI-TARS** Local-Run
+
+1. Follow [Cloud Deployment](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#cloud-deployment) or [VLLM deployment](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#local-deployment-vllm) guides to deploy your UI-TARS server.
+
+2. Test your UI-TARS sever with the script `.\install_tools\test_ui-tars_server.py`.
+
+#### 3.4 (Optional) Deploy the Qwen Planner on a Remote Server
+
+1. Clone this project on your SSH server.
+
+2. Start the planner bridge:
+
+    ```bash
+    python computer_use_demo/remote_inference.py --host 0.0.0.0 --port 8000
+    ```
+
 ### 4. Start the Interface ▶️
 
 **Start the OOTB interface:**
