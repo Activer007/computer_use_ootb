@@ -9,6 +9,7 @@ from enum import StrEnum
 from anthropic import APIResponse
 from anthropic.types.beta import BetaContentBlock, BetaMessage, BetaMessageParam
 from computer_use_demo.tools import ToolResult
+from computer_use_demo.tools.hardware import resolve_showui_model_path
 
 from computer_use_demo.tools.colorful_text import colorful_text_showui, colorful_text_vlm
 from computer_use_demo.tools.screen_capture import get_screenshot
@@ -177,10 +178,7 @@ def sampling_loop_sync(
         
         from computer_use_demo.executor.showui_executor import ShowUIExecutor
         from computer_use_demo.gui_agent.actor.showui_agent import ShowUIActor
-        if showui_awq_4bit:
-            showui_model_path = "./showui-2b-awq-4bit/"
-        else:
-            showui_model_path = "./showui-2b/"
+        showui_model_path = resolve_showui_model_path(showui_awq_4bit)
             
         import torch
         if torch.cuda.is_available(): device = torch.device("cuda")

@@ -1,17 +1,21 @@
-import os
-from huggingface_hub import hf_hub_download, list_repo_files
+"""Compatibility wrapper for installing the quantised ShowUI weights."""
 
-# Specify the model repository and destination folder
-model_repo = "yyyang/showui-2b-awq"
-destination_folder = "./showui-2b-awq"
+from __future__ import annotations
 
-# Ensure the destination folder exists
-os.makedirs(destination_folder, exist_ok=True)
+import sys
+from pathlib import Path
 
-# List all files in the repository
-files = list_repo_files(repo_id=model_repo)
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-# Download each file to the destination folder
-for file in files:
-    file_path = hf_hub_download(repo_id=model_repo, filename=file, local_dir=destination_folder)
-    print(f"Downloaded {file} to {file_path}")
+from install_tools.install_showui import run_installation  # noqa: E402
+
+
+def main() -> None:
+    run_installation(precision="awq-4bit", skip_deps=False, force=False, skip_torch=False)
+
+
+if __name__ == "__main__":
+    main()
+
