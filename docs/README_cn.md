@@ -78,18 +78,51 @@ python install_tools/setup_ootb.py
 - 创建 `.env` 或 `api_keys.json`，方便稍后填写密钥；
 - 输出下一步操作（例如 `python app.py`、默认端口 `7860`）。
 
-脚本可重复执行，所有步骤均为可选并具有幂等性。
+脚本可重复执行，所有步骤均为可选并具有幂等性。如果你倾向于手动配置，请继续阅读 3.1–3.4 小节。
 
-### 3. 手动/高级选项（如果跳过助手）
+### 3. 手动配置（如未使用助手）
 
-- 手动安装依赖：
+#### 3.1 手动安装依赖 🔧
+
+若未使用助手，请手动安装依赖：
+
+```
+pip install -r requirements.txt
+```
+
+#### 3.2 （可选）为 **<span style="color:rgb(106, 158, 210)">S</span><span style="color:rgb(111, 163, 82)">h</span><span style="color:rgb(209, 100, 94)">o</span><span style="color:rgb(238, 171, 106)">w</span>UI** 本地运行做准备
+
+1. 使用以下命令下载 ShowUI-2B 模型的所有文件。确保 `ShowUI-2B` 文件夹位于 `computer_use_ootb` 目录下。
+
     ```
-    pip install -r requirements.txt
+    python install_tools/install_showui.py
     ```
-- 下载 ShowUI-2B 权重：`python install_tools/install_showui.py`
-- 下载 ShowUI-2B AWQ 4-bit（仅限 CUDA）：`python install_tools/install_showui-awq-4bit.py`
-- 参考 [UI-TARS 部署指南](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#cloud-deployment)，并使用 `python install_tools/test_ui-tars_server.py` 进行连通性检查
-- 运行本地 Qwen 规划器服务器（高级）：`python computer_use_demo/remote_inference.py --host 0.0.0.0 --port 8000`
+
+2. （可选，仅限 CUDA）下载 ShowUI-2B 的 AWQ 4-bit 模型：
+
+    ```
+    python install_tools/install_showui-awq-4bit.py
+    ```
+
+3. 在您的机器上安装正确的 GPU 版 PyTorch（CUDA、MPS 等）。请参考 [安装指南与验证](https://pytorch.org/get-started/locally/)。
+
+4. 获取 [GPT-4o](https://platform.openai.com/docs/quickstart) 或 [Qwen-VL](https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key) 的 API Key。对于中国大陆用户，可享受 Qwen API 免费试用 100 万 token：[点击查看](https://help.aliyun.com/zh/dashscope/developer-reference/tongyi-qianwen-vl-plus-api)。
+
+#### 3.3 （可选）为 **UI-TARS** 本地运行做准备
+
+1. 参考 [Cloud Deployment](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#cloud-deployment) 或 [VLLM 部署](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#local-deployment-vllm) 指南部署 UI-TARS 服务。
+
+2. 通过脚本 `.\install_tools\test_ui-tars_server.py` 测试 UI-TARS 服务可用性。
+
+#### 3.4 （可选）在远程服务器部署 Qwen 规划器
+
+1. 在 SSH 服务器上克隆本项目。
+
+2. 启动规划器桥接：
+
+    ```
+    python computer_use_demo/remote_inference.py --host 0.0.0.0 --port 8000
+    ```
 
 ### 4. 启动界面 ▶️
 
