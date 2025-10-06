@@ -569,14 +569,30 @@ class ComputerTool(BaseAnthropicTool):
         else:  # Linux or other OS
             cmd = "xrandr | grep ' primary' | awk '{print $4}'"
             try:
-                output = subprocess.check_output(cmd, shell=True).decode()
-                resolution = output.strip().split()[0]
-                parts = resolution.split('+')[0]  # Get just the "1920x1080" part
-                width, height = map(int, parts.split('x'))
-                return width, height
-                bbox = (0, 0, width, height)  # Assuming single primary screen for simplicity
-            except subprocess.CalledProcessError:
-                raise RuntimeError("Failed to get screen resolution on Linux.")
+                output = subprocess.check_output(cmd, shell=True).decode().strip()
+                if not output:
+                    raise RuntimeError("Failed to get screen resolution on Linux.")
+
+                # Some versions of xrandr can return multiple entries, we only care about the
+                # first geometry description.
+                resolution = output.split()[0]
+
+                geometry, *offset_parts = resolution.split('+')
+                width, height = map(int, geometry.split('x'))
+                x_offset = int(offset_parts[0]) if len(offset_parts) > 0 else 0
+                y_offset = int(offset_parts[1]) if len(offset_parts) > 1 else 0
+
+                class LinuxScreen:
+                    def __init__(self, x: int, y: int, width: int, height: int) -> None:
+                        self.x = x
+                        self.y = y
+                        self.width = width
+                        self.height = height
+
+                screen = LinuxScreen(x_offset, y_offset, width, height)
+                bbox = (screen.x, screen.y, screen.x + screen.width, screen.y + screen.height)
+            except subprocess.CalledProcessError as exc:
+                raise RuntimeError("Failed to get screen resolution on Linux.") from exc
 
         # Take screenshot using the bounding box
         screenshot = ImageGrab.grab(bbox=bbox)
