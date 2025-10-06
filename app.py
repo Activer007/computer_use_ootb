@@ -116,6 +116,8 @@ def setup_state(state):
         state["max_pixels"] = 1344
     if "awq_4bit" not in state:
         state["awq_4bit"] = False
+    if "showui_split" not in state:
+        state["showui_split"] = "desktop"
 
 
 async def main(state):
@@ -245,6 +247,7 @@ def process_input(user_input, state):
         selected_screen=state['selected_screen'],
         showui_max_pixels=state['max_pixels'],
         showui_awq_4bit=state['awq_4bit'],
+        showui_split=state['showui_split'],
         ui_tars_url=state["ui_tars_url"],
         ui_tars_api_key=state.get("ui_tars_api_key", "")
     ):
@@ -310,6 +313,14 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                     label="Actor Model",
                     choices=["ShowUI", "UI-TARS"],
                     value="ShowUI",
+                    interactive=True,
+                )
+
+            with gr.Column():
+                showui_split_selector = gr.Radio(
+                    label="ShowUI Split",
+                    choices=["desktop", "phone"],
+                    value=state.value.get("showui_split", "desktop"),
                     interactive=True,
                 )
 
@@ -399,6 +410,9 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     def update_ui_tars_api_key(ui_tars_api_key_value, state):
         state["ui_tars_api_key"] = ui_tars_api_key_value
+
+    def update_showui_split(showui_split_value, state):
+        state["showui_split"] = showui_split_value
 
     # Callback to update the second dropdown based on the first selection
     def update_second_menu(selected_category):
@@ -699,6 +713,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         outputs=planner_api_key,
     )
     actor_model.change(fn=update_actor_model, inputs=[actor_model, state], outputs=None)
+    showui_split_selector.change(fn=update_showui_split, inputs=[showui_split_selector, state], outputs=None)
 
     screen_selector.change(fn=update_selected_screen, inputs=[screen_selector, state], outputs=None)
     only_n_images.change(fn=update_only_n_images, inputs=[only_n_images, state], outputs=None)

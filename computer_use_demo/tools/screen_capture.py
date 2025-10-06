@@ -1,6 +1,7 @@
 import subprocess
 import base64
 from pathlib import Path
+
 from PIL import ImageGrab
 from uuid import uuid4
 from screeninfo import get_monitors
@@ -14,6 +15,22 @@ from .base import BaseAnthropicTool, ToolError, ToolResult
 
 
 OUTPUT_DIR = "./tmp/outputs"
+
+
+_LAST_SCREENSHOT_INFO: dict | None = None
+
+
+def record_screenshot_info(**kwargs):
+    """Record metadata about the most recent screenshot."""
+    global _LAST_SCREENSHOT_INFO
+    if _LAST_SCREENSHOT_INFO is None:
+        _LAST_SCREENSHOT_INFO = {}
+    _LAST_SCREENSHOT_INFO.update(kwargs)
+
+
+def get_last_screenshot_info() -> dict | None:
+    """Return metadata captured for the latest screenshot."""
+    return _LAST_SCREENSHOT_INFO
 
 def get_screenshot(selected_screen: int = 0, resize: bool = True, target_width: int = 1920, target_height: int = 1080):
         # print(f"get_screenshot selected_screen: {selected_screen}")
@@ -104,8 +121,17 @@ def get_screenshot(selected_screen: int = 0, resize: bool = True, target_width: 
             except subprocess.CalledProcessError:
                 raise RuntimeError("Failed to get screen resolution on Linux.")
 
+        # Store basic metadata before any processing
+        record_screenshot_info(
+            selected_screen=selected_screen,
+            bbox=bbox,
+        )
+
         # Take screenshot using the bounding box
         screenshot = ImageGrab.grab(bbox=bbox)
+
+        # Update with the raw size captured from the monitor
+        record_screenshot_info(raw_size=screenshot.size)
 
         # Set offsets (for potential future use)
         offset_x = screen['x'] if system == "Darwin" else screen.x
@@ -114,9 +140,13 @@ def get_screenshot(selected_screen: int = 0, resize: bool = True, target_width: 
         # # Resize if 
         if resize:
             screenshot = screenshot.resize((target_width, target_height))
+            record_screenshot_info(resized_size=screenshot.size)
 
         # Save the screenshot
         screenshot.save(str(path))
+
+        # By default, assume the processed image matches the current screenshot size.
+        record_screenshot_info(processed_size=screenshot.size)
 
         if path.exists():
             # Return a ToolResult instance instead of a dictionary

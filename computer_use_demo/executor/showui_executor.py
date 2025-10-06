@@ -19,6 +19,7 @@ from anthropic.types.beta import (
 )
 
 from computer_use_demo.tools import BashTool, ComputerTool, EditTool, ToolCollection, ToolResult
+from computer_use_demo.tools.screen_capture import get_last_screenshot_info
 from computer_use_demo.tools.colorful_text import colorful_text_showui, colorful_text_vlm
 
 
@@ -28,10 +29,12 @@ class ShowUIExecutor:
         output_callback: Callable[[BetaContentBlockParam], None],
         tool_output_callback: Callable[[Any, str], None],
         selected_screen: int = 0,
+        split: str = "desktop",
     ):
         self.output_callback = output_callback
         self.tool_output_callback = tool_output_callback
         self.selected_screen = selected_screen
+        self.split = split
         self.screen_bbox = self._get_screen_resolution()
         print("Screen BBox:", self.screen_bbox)
 
@@ -51,6 +54,9 @@ class ShowUIExecutor:
             "SCROLL": "scroll",
             "HOTKEY": "key",
             "STOP": None,
+            "TAP": "mouse",
+            "SWIPE": "mouse",
+            "ANSWER": "type",
         }
         # Track whether a terminating action (like STOP) was observed so the
         # caller can decide to exit any action loop safely.
@@ -211,7 +217,7 @@ class ShowUIExecutor:
                     stop_encountered = True
                     break
 
-                if action_name == "CLICK":  # click -> mouse_move + left_click
+                if action_name == "CLICK" or action_name == "TAP":  # click/tap -> mouse_move + left_click
                     coordinate = _maybe_resolve_coordinate(action_item)
                     if coordinate is not None:
                         refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
@@ -271,6 +277,21 @@ class ShowUIExecutor:
                         refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
                     refined_output.append({"action": "left_press", "text": None, "coordinate": None})
 
+                elif action_name == "SWIPE":
+                    swipe_path = action_item.get("position")
+                    if not isinstance(swipe_path, (list, tuple)) or len(swipe_path) != 2:
+                        raise ValueError("SWIPE action requires start and end positions.")
+                    start_coord = self._resolve_coordinate({**action_item, "position": swipe_path[0]})
+                    end_coord = self._resolve_coordinate({**action_item, "position": swipe_path[1]})
+                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": start_coord})
+                    refined_output.append({"action": "left_click_drag", "text": None, "coordinate": end_coord})
+
+                elif action_name == "ANSWER":
+                    answer_text = action_item.get("value") or action_item.get("text")
+                    if not isinstance(answer_text, str):
+                        raise ValueError("ANSWER action requires textual value.")
+                    refined_output.append({"action": "type", "text": answer_text, "coordinate": None})
+
                 elif action_name == "HOTKEY":
                     hotkey_value = action_item.get("value")
                     keys: list[str]
@@ -329,10 +350,11 @@ class ShowUIExecutor:
         if not is_absolute and (x_value > 1 or y_value > 1 or x_value < 0 or y_value < 0):
             is_absolute = True
 
-        x_offset = self.screen_bbox[0]
-        y_offset = self.screen_bbox[1]
-        width = self.screen_bbox[2] - self.screen_bbox[0]
-        height = self.screen_bbox[3] - self.screen_bbox[1]
+        viewport_bbox, image_size = self._get_viewport_bbox()
+        x_offset, y_offset, x_max, y_max = viewport_bbox
+        width = x_max - x_offset
+        height = y_max - y_offset
+        image_width, image_height = image_size
 
         if width <= 0 or height <= 0:
             raise ValueError("Invalid screen bounds returned from monitor lookup.")
@@ -340,18 +362,50 @@ class ShowUIExecutor:
         if is_absolute:
             x_px = int(round(x_value))
             y_px = int(round(y_value))
+            if image_width and image_width > 0 and image_height and image_height > 0:
+                scale_x = width / image_width
+                scale_y = height / image_height
+                x_px = int(round(x_px * scale_x))
+                y_px = int(round(y_px * scale_y))
             return x_px + x_offset, y_px + y_offset
 
         x_clamped = max(0.0, min(1.0, x_value))
         y_clamped = max(0.0, min(1.0, y_value))
 
-        x_px = int(round(x_clamped * width))
-        y_px = int(round(y_clamped * height))
+        if image_width and image_width > 0 and image_height and image_height > 0:
+            scale_x = width / image_width
+            scale_y = height / image_height
+            x_px = int(round(x_clamped * image_width * scale_x))
+            y_px = int(round(y_clamped * image_height * scale_y))
+        else:
+            x_px = int(round(x_clamped * width))
+            y_px = int(round(y_clamped * height))
 
         x_px = min(max(x_px, 0), width - 1)
         y_px = min(max(y_px, 0), height - 1)
 
         return x_px + x_offset, y_px + y_offset
+
+    def _get_viewport_bbox(self) -> tuple[tuple[int, int, int, int], tuple[int, int]]:
+        """Determine the active viewport used for action mapping."""
+        info = get_last_screenshot_info() or {}
+        bbox = self.screen_bbox
+
+        if self.split == "phone" and info.get("selected_screen") == self.selected_screen:
+            crop_box = info.get("crop_box")
+            if crop_box:
+                bbox = (
+                    bbox[0] + crop_box[0],
+                    bbox[1] + crop_box[1],
+                    bbox[0] + crop_box[2],
+                    bbox[1] + crop_box[3],
+                )
+
+        image_size = info.get("processed_size") or info.get("resized_size") or info.get("raw_size")
+        if not image_size:
+            image_size = (bbox[2] - bbox[0], bbox[3] - bbox[1])
+
+        return bbox, image_size
 
     def _get_screen_resolution(self):
         from screeninfo import get_monitors

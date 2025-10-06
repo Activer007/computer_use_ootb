@@ -2,19 +2,21 @@ import os
 import ast
 import base64
 from io import BytesIO
-from pathlib import Path
 from uuid import uuid4
 
 import pyautogui
 import requests
 import torch
-from PIL import Image, ImageDraw
+from PIL import Image
 from qwen_vl_utils import process_vision_info
 from transformers import AutoProcessor, Qwen2VLForConditionalGeneration
 
 from computer_use_demo.gui_agent.llm_utils.oai import encode_image
 from computer_use_demo.tools.colorful_text import colorful_text_showui, colorful_text_vlm
-from computer_use_demo.tools.screen_capture import get_screenshot
+from computer_use_demo.tools.screen_capture import (
+    get_screenshot,
+    record_screenshot_info,
+)
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
@@ -97,8 +99,21 @@ class ShowUIActor:
         task = messages
         
         # screenshot
-        screenshot, screenshot_path = get_screenshot(selected_screen=self.selected_screen, resize=True, target_width=1920, target_height=1080)
+        resize = False if self.split == 'phone' else True
+        target_width = 1920 if self.split != 'phone' else 1080
+        target_height = 1080 if self.split != 'phone' else 1920
+        screenshot, screenshot_path = get_screenshot(
+            selected_screen=self.selected_screen,
+            resize=resize,
+            target_width=target_width,
+            target_height=target_height,
+        )
         screenshot_path = str(screenshot_path)
+        if self.split == 'phone':
+            screenshot = self._prepare_phone_view(screenshot)
+            screenshot.save(screenshot_path)
+        else:
+            record_screenshot_info(split='desktop', crop_box=None, processed_size=screenshot.size)
         image_base64 = encode_image(screenshot_path)
         self.output_callback(f'Screenshot for {colorful_text_showui}:\n<img src="data:image/png;base64,{image_base64}">', sender="bot")
 
@@ -160,6 +175,37 @@ class ShowUIActor:
         # Return response in expected format
         response = {'content': output_text, 'role': 'assistant'}
         return response
+
+
+    def _prepare_phone_view(self, screenshot: Image.Image) -> Image.Image:
+        """Crop and resize the screenshot to emulate a phone viewport."""
+        width, height = screenshot.size
+        if width == 0 or height == 0:
+            record_screenshot_info(split='phone', crop_box=None, processed_size=screenshot.size)
+            return screenshot
+
+        target_ratio = 9 / 16  # width / height for a portrait phone display
+        current_ratio = width / height
+
+        if current_ratio > target_ratio:
+            # Screen is wider than phone ratio – crop horizontally
+            new_width = int(height * target_ratio)
+            left = max((width - new_width) // 2, 0)
+            right = min(left + new_width, width)
+            top, bottom = 0, height
+        else:
+            # Screen is taller – crop vertically
+            new_height = int(width / target_ratio)
+            top = max((height - new_height) // 2, 0)
+            bottom = min(top + new_height, height)
+            left, right = 0, width
+
+        crop_box = (left, top, right, bottom)
+        cropped = screenshot.crop(crop_box)
+        processed = cropped.resize((1080, 1920))
+
+        record_screenshot_info(split='phone', crop_box=crop_box, processed_size=processed.size)
+        return processed
 
 
     def parse_showui_output(self, output_text):
