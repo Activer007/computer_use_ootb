@@ -63,26 +63,35 @@ git clone https://github.com/showlab/computer_use_ootb.git
 cd computer_use_ootb
 ```
 
-### 2.1 安装依赖 🔧
-```
-pip install -r dev-requirements.txt
-```
+### 2. 使用交互式安装助手（推荐）🤖
 
-### 2.2 （可选）为 **<span style="color:rgb(106, 158, 210)">S</span><span style="color:rgb(111, 163, 82)">h</span><span style="color:rgb(209, 100, 94)">o</span><span style="color:rgb(238, 171, 106)">w</span>UI** 本地运行做准备
+运行脚本即可检查 Conda/虚拟环境、安装依赖、下载本地模型，并生成 API Key 占位文件：
 
-1. 使用以下命令下载 ShowUI-2B 模型的所有文件。确保 ShowUI-2B 文件夹位于 computer_use_ootb 文件夹下。
-
-    
 ```
-python install_showui.py
+python install_tools/setup_ootb.py
 ```
 
+该助手可以：
+- 检测当前是否在 Conda/venv 中运行；
+- 使用当前 Python 解释器安装 `requirements.txt`；
+- 可选下载 ShowUI 全精度或 AWQ 4-bit 模型，或查看 UI-TARS / 本地 Qwen 配置提示；
+- 创建 `.env` 或 `api_keys.json`，方便稍后填写密钥；
+- 输出下一步操作（例如 `python app.py`、默认端口 `7860`）。
 
-2. 在您的机器上安装正确的 GPU 版 PyTorch（CUDA、MPS 等）。请参考 [安装指南与验证](https://pytorch.org/get-started/locally/)。
+脚本可重复执行，所有步骤均为可选并具有幂等性。
 
-3. 获取 [GPT-4o](https://platform.openai.com/docs/quickstart) 或 [Qwen-VL](https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key) 的 API Key。对于中国大陆用户，可享受 Qwen API 免费试用 100 万token：[点击查看](https://help.aliyun.com/zh/dashscope/developer-reference/tongyi-qianwen-vl-plus-api)。
+### 3. 手动/高级选项（如果跳过助手）
 
-### 3. 启动界面 ▶️
+- 手动安装依赖：
+    ```
+    pip install -r requirements.txt
+    ```
+- 下载 ShowUI-2B 权重：`python install_tools/install_showui.py`
+- 下载 ShowUI-2B AWQ 4-bit（仅限 CUDA）：`python install_tools/install_showui-awq-4bit.py`
+- 参考 [UI-TARS 部署指南](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#cloud-deployment)，并使用 `python install_tools/test_ui-tars_server.py` 进行连通性检查
+- 运行本地 Qwen 规划器服务器（高级）：`python computer_use_demo/remote_inference.py --host 0.0.0.0 --port 8000`
+
+### 4. 启动界面 ▶️
 
 **启动 OOTB 界面：**
 ```
@@ -109,7 +118,7 @@ $env:GEMINI_API_KEY="sk-xxxxx"
 > 在 macOS/Linux 中，将上述命令中的 $env:ANTHROPIC_API_KEY 替换为 export ANTHROPIC_API_KEY 即可。
 
 
-### 4. 使用任意可访问网络的设备控制您的电脑
+### 5. 使用任意可访问网络的设备控制您的电脑
 - **待控制的电脑**：安装了上述软件的那台电脑。
 - **发送指令的设备**：打开网址的任意设备。
 
@@ -123,6 +132,16 @@ $env:GEMINI_API_KEY="sk-xxxxx"
   </figure>
 </div>
 
+
+
+### 依赖与权限问题排查表
+
+| 现象 | 可能原因 | 建议解决方案 |
+| --- | --- | --- |
+| `pip` 提示无写权限 | 使用系统 Python、无管理员权限 | 建议先创建 Conda 环境（如 `conda create -n ootb python=3.11`），再运行 `python install_tools/setup_ootb.py`。 |
+| 安装依赖出现 SSL/代理错误 | 公司或校园网络限制 PyPI | 在 `pip.ini`/`.pip/pip.conf` 中配置代理，或手动下载离线 whl 后重新执行助手。 |
+| 启动 ShowUI 时找不到 CUDA 库 | 未安装对应 CUDA 版本的 PyTorch | 参考 [官方安装指南](https://pytorch.org/get-started/locally/) 重新安装合适的 GPU 版 PyTorch。 |
+| 创建 `.env` 或模型目录时报 `PermissionError` | 仓库位于只读目录 | 将仓库移动到可写路径（如 `~/computer_use_ootb`），或在具有写权限的终端中重试。 |
 
 
 ## 🖥️ 支持的系统

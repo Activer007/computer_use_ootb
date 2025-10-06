@@ -64,34 +64,34 @@ git clone https://github.com/showlab/computer_use_ootb.git
 cd computer_use_ootb
 ```
 
-### 2.1 Install Dependencies 🔧
+### 2. Use the Setup Assistant (Recommended) 🤖
+
+Run the interactive helper to check your environment, install dependencies, download optional local models, and generate API key templates:
+
 ```bash
-pip install -r requirements.txt
+python install_tools/setup_ootb.py
 ```
 
-### 2.2 (Optional) Get Prepared for **<span style="color:rgb(106, 158, 210)">S</span><span style="color:rgb(111, 163, 82)">h</span><span style="color:rgb(209, 100, 94)">o</span><span style="color:rgb(238, 171, 106)">w</span>UI** Local-Run
+The assistant can:
+- verify whether you're inside a Conda/venv environment;
+- install `requirements.txt` using your current Python interpreter;
+- optionally download ShowUI models (full precision or AWQ 4-bit) or review UI-TARS/Qwen deployment tips;
+- create `.env` or `api_keys.json` files with placeholders so you can add API keys later;
+- print the next steps (e.g., `python app.py`, default port `7860`).
 
-1. Download all files of the ShowUI-2B model via the following command. Ensure the `ShowUI-2B` folder is under the `computer_use_ootb` folder.
+You can rerun the script at any time—every step is optional and idempotent.
 
-    ```python
-    python install_tools/install_showui.py
+### 3. Manual / Advanced Options (if you skipped the assistant)
+
+- Install dependencies manually:
+    ```bash
+    pip install -r requirements.txt
     ```
-
-2. Make sure to install the correct GPU version of PyTorch (CUDA, MPS, etc.) on your machine. See [install guide and verification](https://pytorch.org/get-started/locally/).
-
-3. Get API Keys for [GPT-4o](https://platform.openai.com/docs/quickstart) or [Qwen-VL](https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key). For mainland China users, Qwen API free trial for first 1 mil tokens is [available](https://help.aliyun.com/zh/dashscope/developer-reference/tongyi-qianwen-vl-plus-api).
-
-### 2.3 (Optional) Get Prepared for **UI-TARS** Local-Run
-
-1. Follow [Cloud Deployment](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#cloud-deployment) or [VLLM deployment](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#local-deployment-vllm) guides to deploy your UI-TARS server.
-
-2. Test your UI-TARS sever with the script `.\install_tools\test_ui-tars_server.py`.
-
-### 2.4 (Optional) If you want to deploy Qwen model as planner on ssh server
-1. git clone this project on your ssh server
-
-2. python computer_use_demo/remote_inference.py
-### 3. Start the Interface ▶️
+- Download ShowUI-2B weights: `python install_tools/install_showui.py`
+- Download ShowUI-2B AWQ 4-bit (CUDA only): `python install_tools/install_showui-awq-4bit.py`
+- Follow [UI-TARS deployment](https://github.com/bytedance/UI-TARS?tab=readme-ov-file#cloud-deployment) guides and sanity-check with `python install_tools/test_ui-tars_server.py`
+- Run a local Qwen planner server (advanced): `python computer_use_demo/remote_inference.py --host 0.0.0.0 --port 8000`
+### 4. Start the Interface ▶️
 
 **Start the OOTB interface:**
 ```bash
@@ -114,7 +114,7 @@ If you successfully start the interface, you will see two URLs in the terminal:
 > On macOS/Linux, replace `$env:ANTHROPIC_API_KEY` with `export ANTHROPIC_API_KEY` in the above command. 
 
 
-### 4. Control Your Computer with Any Device can Access the Internet
+### 5. Control Your Computer with Any Device can Access the Internet
 - **Computer to be controlled**: The one installed software.
 - **Device Send Command**: The one opens the website.
   
@@ -131,6 +131,15 @@ python install_tools/install_showui-awq-4bit.py
 Then, enable the quantized setting in the 'ShowUI Advanced Settings' dropdown menu.
 
 Besides, we also provide a slider to quickly adjust the `max_pixel` parameter in the ShowUI model. This controls the visual input size of the model and greatly affects the memory and inference speed.
+
+### Troubleshooting Dependency & Permission Issues
+
+| Symptom | Likely Cause | Suggested Fix |
+| --- | --- | --- |
+| `pip` cannot write to site-packages | Missing admin rights / system Python | Activate a Conda env (`conda create -n ootb python=3.11`) and rerun `python install_tools/setup_ootb.py`. |
+| SSL or proxy errors when installing packages | Corporate network blocks PyPI | Configure your proxy in `pip.ini`/`.pip/pip.conf` or download wheels manually, then rerun the assistant. |
+| CUDA libraries not found while starting ShowUI | PyTorch GPU build missing | Reinstall PyTorch with the correct CUDA/MPS build: [install guide](https://pytorch.org/get-started/locally/). |
+| `PermissionError` when creating `.env` or model folders | Script executed from read-only directory | Move the repo to a writable location (e.g., `~/computer_use_ootb`) or rerun the script with elevated permissions. |
 
 ## 📊 GUI Agent Model Zoo
 
