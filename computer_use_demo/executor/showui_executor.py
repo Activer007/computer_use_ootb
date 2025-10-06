@@ -1,94 +1,94 @@
 import ast
 import asyncio
-from typing import Any, Dict, cast, List, Union
 from collections.abc import Callable
 import uuid
+from typing import Any, Dict, List, Union, cast
+
+from anthropic.types import TextBlock
 from anthropic.types.beta import (
     BetaContentBlock,
     BetaContentBlockParam,
     BetaImageBlockParam,
     BetaMessage,
     BetaMessageParam,
+    BetaTextBlock,
     BetaTextBlockParam,
     BetaToolResultBlockParam,
+    BetaToolUseBlock,
 )
-from anthropic.types import TextBlock
-from anthropic.types.beta import BetaMessage, BetaTextBlock, BetaToolUseBlock
+
 from computer_use_demo.tools import BashTool, ComputerTool, EditTool, ToolCollection, ToolResult
 from computer_use_demo.tools.colorful_text import colorful_text_showui, colorful_text_vlm
 
 
 class ShowUIExecutor:
     def __init__(
-        self, 
-        output_callback: Callable[[BetaContentBlockParam], None], 
+        self,
+        output_callback: Callable[[BetaContentBlockParam], None],
         tool_output_callback: Callable[[Any, str], None],
-        selected_screen: int = 0
+        selected_screen: int = 0,
     ):
         self.output_callback = output_callback
         self.tool_output_callback = tool_output_callback
         self.selected_screen = selected_screen
         self.screen_bbox = self._get_screen_resolution()
         print("Screen BBox:", self.screen_bbox)
-        
+
         self.tool_collection = ToolCollection(
             ComputerTool(selected_screen=selected_screen, is_scaling=False)
         )
-        
+
+        # Supported actions emitted by ShowUI or UI-TARS.  We only need
+        # membership checks, so keep them in a set.
         self.supported_action_type = {
-            # "showui_action": "anthropic_tool_action"
-            "CLICK": "mouse",
-            "HOVER": "mouse",
-            "INPUT": "type",
-            "ENTER": "key",
-            "ESC": "key",
-            "ESCAPE": "key",
-            "PRESS": "mouse",
-            "SCROLL": "scroll",
-            "HOTKEY": "key",
-            "STOP": None,
+            "CLICK",
+            "INPUT",
+            "ENTER",
+            "ESC",
+            "ESCAPE",
+            "PRESS",
+            "HOVER",
+            "SCROLL",
+            "HOTKEY",
+            "STOP",
         }
+        # Track whether a terminating action (like STOP) was observed so the
+        # caller can decide to exit any action loop safely.
+        self.stop_requested = False
 
     def __call__(self, response: str, messages: list[BetaMessageParam]):
         # response is expected to be :
-        # {'content': "{'action': 'CLICK', 'value': None, 'position': [0.83, 0.15]}, ...", 'role': 'assistant'}, 
-        
+        # {'content': "{'action': 'CLICK', 'value': None, 'position': [0.83, 0.15]}, ...", 'role': 'assistant'},
+
         action_dict = self._format_actor_output(response)  # str -> dict
-        
+
         actions = action_dict["content"]
         role = action_dict["role"]
-        
+
         # Parse the actions from showui
         action_list = self._parse_showui_output(actions)
         print("Parsed Action List:", action_list)
-        
+
         tool_result_content = None
-        
+
         if action_list is not None and len(action_list) > 0:
-                    
+
             for action in action_list:  # Execute the tool (adapting the code from anthropic_executor.py)
-            
+
                 tool_result_content: list[BetaToolResultBlockParam] = []
-                
+
                 self.output_callback(f"{colorful_text_showui}:\n{action}", sender="bot")
                 print("Converted Action:", action)
-                
-                tool_input: Dict[str, Any] = {
-                    "action": action["action"],
-                    "text": action.get("text"),
-                    "coordinate": action.get("coordinate"),
-                }
 
-                if "scroll_direction" in action:
-                    tool_input["scroll_direction"] = action["scroll_direction"]
+                tool_input: dict[str, Any] = dict(action)
 
                 sim_content_block = BetaToolUseBlock(
-                    id=f'toolu_{uuid.uuid4()}',
+                    id=f"toolu_{uuid.uuid4()}",
                     input=tool_input,
-                    name='computer',
-                    type='tool_use'
+                    name="computer",
+                    type="tool_use",
                 )
-                
+
                 # update messages
                 new_message = {
                     "role": "assistant",
@@ -102,7 +102,7 @@ class ShowUIExecutor:
                     name=sim_content_block.name,
                     tool_input=cast(dict[str, Any], sim_content_block.input),
                 )
-                
+
                 tool_result_content.append(
                     _make_api_tool_result(result, sim_content_block.id)
                 )
@@ -115,27 +115,24 @@ class ShowUIExecutor:
                 # Send the messages to the gradio
                 for user_msg, bot_msg in display_messages:
                     yield [user_msg, bot_msg], tool_result_content
-        
+
         return tool_result_content
-    
-    
-    def _format_actor_output(self, action_output: str|dict) -> Dict[str, Any]:
-        if type(action_output) == dict:
+
+    def _format_actor_output(self, action_output: str | dict) -> Dict[str, Any]:
+        if isinstance(action_output, dict):
             return action_output
-        else:
-            try:
-                action_output.replace("'", "\"")
-                action_dict = ast.literal_eval(action_output)
-                return action_dict
-            except Exception as e:
-                print(f"Error parsing action output: {e}")
-                return None
-    
+        try:
+            action_output.replace("'", '\"')
+            action_dict = ast.literal_eval(action_output)
+            return action_dict
+        except Exception as e:
+            print(f"Error parsing action output: {e}")
+            return None
 
     def _parse_showui_output(self, output_text: str) -> Union[List[Dict[str, Any]], None]:
         try:
             output_text = output_text.strip()
-            
+
             # process single dictionary
             if output_text.startswith("{") and output_text.endswith("}"):
                 output_text = f"[{output_text}]"
@@ -158,75 +155,112 @@ class ShowUIExecutor:
             if not all(isinstance(item, dict) for item in parsed_output):
                 raise ValueError("Not all items in the parsed output are dictionaries.")
 
+            # reset termination flag for a new batch of actions
+            self.stop_requested = False
+
             # refine key: value pairs, mapping to the Anthropic's format
-            refined_output = []
-            
-            stop_encountered = False
+            refined_output: list[dict[str, Any]] = []
+
+            def _maybe_resolve_coordinate(action_item: Dict[str, Any]):
+                if action_item.get("position") is None:
+                    return None
+                return self._resolve_coordinate(action_item)
 
             for action_item in parsed_output:
 
                 print("Action Item:", action_item)
                 # sometime showui returns lower case action names
-                action_item["action"] = action_item["action"].upper()
+                action_name = action_item.get("action", "").upper()
+                action_item["action"] = action_name
 
-                if action_item["action"] not in self.supported_action_type:
+                if action_name not in self.supported_action_type:
                     raise ValueError(
-                        f"Action {action_item['action']} not supported. Check the output from ShowUI: {output_text}"
+                        f"Action {action_name} not supported. Check the output from ShowUI: {output_text}"
                     )
 
-                if action_item["action"] == "STOP":
-                    stop_encountered = True
-                    # Stop indicates that there are no more actions to execute.
+                if action_name == "STOP":
+                    # Signal that execution should stop.  We keep any already
+                    # generated actions so the caller can finish the current run
+                    # but mark that ShowUI requested a stop.
+                    self.stop_requested = True
                     break
 
-                elif action_item["action"] == "CLICK":  # 1. click -> mouse_move + left_click
-                    coordinate = self._resolve_coordinate(action_item)
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
+                if action_name == "CLICK":  # 1. click -> mouse_move + left_click
+                    coordinate = _maybe_resolve_coordinate(action_item)
+                    if coordinate is not None:
+                        refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
                     refined_output.append({"action": "left_click", "text": None, "coordinate": None})
 
-                elif action_item["action"] == "INPUT":  # 2. input -> type
-                    refined_output.append({"action": "type", "text": action_item["value"], "coordinate": None})
+                elif action_name == "INPUT":  # 2. input -> type
+                    refined_output.append({"action": "type", "text": action_item.get("value"), "coordinate": None})
 
-                elif action_item["action"] == "ENTER":  # 3. enter -> key, enter
+                elif action_name == "ENTER":  # 3. enter -> key, enter
                     refined_output.append({"action": "key", "text": "Enter", "coordinate": None})
 
-                elif action_item["action"] == "ESC" or action_item["action"] == "ESCAPE":  # 4. enter -> key, enter
+                elif action_name in ("ESC", "ESCAPE"):  # 4. escape -> key, escape
                     refined_output.append({"action": "key", "text": "Escape", "coordinate": None})
 
-                elif action_item["action"] == "HOVER":  # 5. hover -> mouse_move
-                    coordinate = self._resolve_coordinate(action_item)
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
+                elif action_name == "HOVER":  # 5. hover -> mouse_move
+                    coordinate = _maybe_resolve_coordinate(action_item)
+                    if coordinate is not None:
+                        refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
 
-                elif action_item["action"] == "SCROLL":  # 6. scroll -> scroll tool
-                    direction = (action_item.get("value") or "down").lower()
-                    if direction not in {"up", "down", "left", "right"}:
-                        raise ValueError(f"Scroll direction {direction} not supported.")
+                elif action_name == "SCROLL":  # 6. scroll -> ComputerTool scroll
+                    scroll_value = action_item.get("value")
+                    scroll_direction = None
+                    scroll_amount = 10
+                    scroll_coordinate = _maybe_resolve_coordinate(action_item)
 
-                    payload: Dict[str, Any] = {
-                        "action": "scroll",
-                        "text": None,
-                        "coordinate": None,
-                        "scroll_direction": direction,
-                    }
+                    if isinstance(scroll_value, dict):
+                        scroll_direction = scroll_value.get("direction")
+                        if "amount" in scroll_value and scroll_value["amount"] is not None:
+                            scroll_amount = int(scroll_value["amount"])
+                    elif isinstance(scroll_value, (list, tuple)) and scroll_value:
+                        scroll_direction = scroll_value[0]
+                        if len(scroll_value) > 1 and isinstance(scroll_value[1], (int, float)):
+                            scroll_amount = int(scroll_value[1])
+                    elif isinstance(scroll_value, str):
+                        scroll_direction = scroll_value
 
-                    if action_item.get("position") is not None:
-                        payload["coordinate"] = self._resolve_coordinate(action_item)
+                    if not scroll_direction:
+                        raise ValueError("Scroll direction missing or invalid.")
 
-                    refined_output.append(payload)
+                    scroll_direction = str(scroll_direction).lower()
+                    if scroll_direction not in {"up", "down", "left", "right"}:
+                        raise ValueError(f"Scroll direction {scroll_direction} not supported.")
 
-                elif action_item["action"] == "HOTKEY":
-                    key_value = action_item.get("value")
-                    if not key_value:
-                        continue
-                    refined_output.append({"action": "key", "text": key_value, "coordinate": None})
+                    refined_output.append(
+                        {
+                            "action": "scroll",
+                            "text": None,
+                            "coordinate": scroll_coordinate,
+                            "scroll_direction": scroll_direction,
+                            "scroll_amount": int(scroll_amount),
+                        }
+                    )
 
-                elif action_item["action"] == "PRESS":  # 7. press
-                    coordinate = self._resolve_coordinate(action_item)
-                    refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
+                elif action_name == "PRESS":  # 7. press -> mouse_move + left_press
+                    coordinate = _maybe_resolve_coordinate(action_item)
+                    if coordinate is not None:
+                        refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
                     refined_output.append({"action": "left_press", "text": None, "coordinate": None})
 
-            if stop_encountered:
-                return refined_output
+                elif action_name == "HOTKEY":
+                    hotkey_value = action_item.get("value")
+                    keys: list[str]
+                    if isinstance(hotkey_value, str):
+                        keys = [part.strip() for part in hotkey_value.split("+") if part.strip()]
+                    elif isinstance(hotkey_value, (list, tuple)):
+                        keys = [str(key).strip() for key in hotkey_value if str(key).strip()]
+                    else:
+                        raise ValueError("Hotkey value must be a string or list of keys.")
+
+                    if not keys:
+                        raise ValueError("Hotkey value is empty.")
+
+                    hotkey_text = "+".join(key.lower() for key in keys)
+
+                    refined_output.append({"action": "key", "text": hotkey_text, "coordinate": None})
 
             return refined_output
 
@@ -269,7 +303,6 @@ class ShowUIExecutor:
             int(round(x_value * width)) + x_offset,
             int(round(y_value * height)) + y_offset,
         )
-        
 
     def _get_screen_resolution(self):
         from screeninfo import get_monitors
@@ -277,7 +310,7 @@ class ShowUIExecutor:
         if platform.system() == "Darwin":
             import Quartz  # uncomment this line if you are on macOS
         import subprocess
-            
+
         # Detect platform
         system = platform.system()
 
@@ -303,23 +336,25 @@ class ShowUIExecutor:
             screens = []
             for display_id in active_displays:
                 bounds = Quartz.CGDisplayBounds(display_id)
-                screens.append({
-                    'id': display_id,
-                    'x': int(bounds.origin.x),
-                    'y': int(bounds.origin.y),
-                    'width': int(bounds.size.width),
-                    'height': int(bounds.size.height),
-                    'is_primary': Quartz.CGDisplayIsMain(display_id)  # Check if this is the primary display
-                })
+                screens.append(
+                    {
+                        "id": display_id,
+                        "x": int(bounds.origin.x),
+                        "y": int(bounds.origin.y),
+                        "width": int(bounds.size.width),
+                        "height": int(bounds.size.height),
+                        "is_primary": Quartz.CGDisplayIsMain(display_id),  # Check if this is the primary display
+                    }
+                )
 
             # Sort screens by x position to arrange from left to right
-            sorted_screens = sorted(screens, key=lambda s: s['x'])
+            sorted_screens = sorted(screens, key=lambda s: s["x"])
 
             if self.selected_screen < 0 or self.selected_screen >= len(screens):
                 raise IndexError("Invalid screen index.")
 
             screen = sorted_screens[self.selected_screen]
-            bbox = (screen['x'], screen['y'], screen['x'] + screen['width'], screen['y'] + screen['height'])
+            bbox = (screen["x"], screen["y"], screen["x"] + screen["width"], screen["y"] + screen["height"])
 
         else:  # Linux or other OS
             cmd = "xrandr | grep ' primary' | awk '{print $4}'"
@@ -328,17 +363,16 @@ class ShowUIExecutor:
                 resolution = output.strip()
                 # Parse the resolution format like "1920x1080+1920+0"
                 # The format is "WIDTHxHEIGHT+X+Y"
-                parts = resolution.split('+')[0]  # Get just the "1920x1080" part
-                width, height = map(int, parts.split('x'))
+                parts = resolution.split("+")[0]  # Get just the "1920x1080" part
+                width, height = map(int, parts.split("x"))
                 # Get the X, Y offset if needed
-                x_offset = int(resolution.split('+')[1]) if len(resolution.split('+')) > 1 else 0
-                y_offset = int(resolution.split('+')[2]) if len(resolution.split('+')) > 2 else 0
+                x_offset = int(resolution.split("+")[1]) if len(resolution.split("+")) > 1 else 0
+                y_offset = int(resolution.split("+")[2]) if len(resolution.split("+")) > 2 else 0
                 bbox = (x_offset, y_offset, x_offset + width, y_offset + height)
             except subprocess.CalledProcessError:
                 raise RuntimeError("Failed to get screen resolution on Linux.")
-        
-        return bbox
 
+        return bbox
 
 
 def _message_display_callback(messages):
@@ -350,9 +384,13 @@ def _message_display_callback(messages):
             elif isinstance(msg["content"][0], BetaTextBlock):
                 display_messages.append((None, msg["content"][0].text))  # Bot message
             elif isinstance(msg["content"][0], BetaToolUseBlock):
-                display_messages.append((None, f"Tool Use: {msg['content'][0].name}\nInput: {msg['content'][0].input}"))  # Bot message
+                display_messages.append(
+                    (None, f"Tool Use: {msg['content'][0].name}\nInput: {msg['content'][0].input}")
+                )  # Bot message
             elif isinstance(msg["content"][0], Dict) and msg["content"][0]["content"][-1]["type"] == "image":
-                display_messages.append((None, f'<img src="data:image/png;base64,{msg["content"][0]["content"][-1]["source"]["data"]}">'))  # Bot message
+                display_messages.append(
+                    (None, f'<img src="data:image/png;base64,{msg["content"][0]["content"][-1]["source"]["data"]}">')
+                )  # Bot message
             else:
                 pass
                 # print(msg["content"][0])
@@ -404,7 +442,6 @@ def _maybe_prepend_system_tool_result(result: ToolResult, result_text: str):
     return result_text
 
 
-
 # Testing main function
 if __name__ == "__main__":
     def output_callback(content_block):
@@ -419,7 +456,7 @@ if __name__ == "__main__":
     executor = ShowUIExecutor(
         output_callback=output_callback,
         tool_output_callback=tool_output_callback,
-        selected_screen=0
+        selected_screen=0,
     )
 
     # test inputs
@@ -440,15 +477,36 @@ if __name__ == "__main__":
     print("\nFinal messages:")
     for msg in messages:
         print(msg)
-        
-        
 
-[
-    {'role': 'user', 'content': ['open a new tab and go to amazon.com', 'tmp/outputs/screenshot_b4a1b7e60a5c47359bedbd8707573966.png']},
-    {'role': 'assistant', 'content': ["History Action: {'action': 'mouse_move', 'text': None, 'coordinate': (1216, 88)}"]}, 
-    {'role': 'assistant', 'content': ["History Action: {'action': 'left_click', 'text': None, 'coordinate': None}"]},
-    {'content': [
-        {'type': 'tool_result', 'content': [{'type': 'text', 'text': 'Moved mouse to (1216, 88)'}], 'tool_use_id': 'toolu_ae4f2886-366c-4789-9fa6-ec13461cef12', 'is_error': False},
-        {'type': 'tool_result', 'content': [{'type': 'text', 'text': 'Performed left_click'}], 'tool_use_id': 'toolu_a7377954-e1b7-4746-9757-b2eb4dcddc82', 'is_error': False}
-                ], 'role': 'user'}
-]
+    [
+        {
+            "role": "user",
+            "content": [
+                "open a new tab and go to amazon.com",
+                "tmp/outputs/screenshot_b4a1b7e60a5c47359bedbd8707573966.png",
+            ],
+        },
+        {"role": "assistant", "content": ["History Action: {'action': 'mouse_move', 'text': None, 'coordinate': (1216, 88)}"]},
+        {"role": "assistant", "content": ["History Action: {'action': 'left_click', 'text': None, 'coordinate': None}"]},
+        {
+            "content": [
+                {
+                    "type": "tool_result",
+                    "content": [
+                        {"type": "text", "text": "Moved mouse to (1216, 88)"}
+                    ],
+                    "tool_use_id": "toolu_ae4f2886-366c-4789-9fa6-ec13461cef12",
+                    "is_error": False,
+                },
+                {
+                    "type": "tool_result",
+                    "content": [
+                        {"type": "text", "text": "Performed left_click"}
+                    ],
+                    "tool_use_id": "toolu_a7377954-e1b7-4746-9757-b2eb4dcddc82",
+                    "is_error": False,
+                },
+            ],
+            "role": "user",
+        },
+    ]

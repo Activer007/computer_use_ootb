@@ -34,7 +34,6 @@ def showui_executor():
 def test_supported_actions_include_stop_and_hotkey(showui_executor):
     assert "STOP" in showui_executor.supported_action_type
     assert "HOTKEY" in showui_executor.supported_action_type
-    assert showui_executor.supported_action_type["HOTKEY"] == "key"
 
 
 def test_parse_hotkey_into_key_action(showui_executor):
@@ -42,8 +41,47 @@ def test_parse_hotkey_into_key_action(showui_executor):
         '[{"action": "hotkey", "value": "Ctrl+C"}]'
     )
     assert parsed == [
-        {"action": "key", "text": "Ctrl+C", "coordinate": None}
+        {"action": "key", "text": "ctrl+c", "coordinate": None}
     ]
+
+
+def test_hotkey_string_normalization(showui_executor):
+    parsed = showui_executor._parse_showui_output(
+        '[{"action": "hotkey", "value": "CTRL+SHIFT+P"}]'
+    )
+
+    assert parsed == [
+        {"action": "key", "text": "ctrl+shift+p", "coordinate": None}
+    ]
+
+
+def test_hover_scroll_and_hotkey_are_parsed(showui_executor):
+    actions = showui_executor._parse_showui_output(
+        str(
+            [
+                {"action": "hover", "position": [0.5, 0.25]},
+                {
+                    "action": "scroll",
+                    "value": {"direction": "down", "amount": 20},
+                    "position": [0.1, 0.2],
+                },
+                {"action": "hotkey", "value": ["CTRL", "L"]},
+            ]
+        )
+    )
+
+    assert actions == [
+        {"action": "mouse_move", "text": None, "coordinate": (100, 25)},
+        {
+            "action": "scroll",
+            "text": None,
+            "coordinate": (20, 20),
+            "scroll_direction": "down",
+            "scroll_amount": 20,
+        },
+        {"action": "key", "text": "ctrl+l", "coordinate": None},
+    ]
+    assert showui_executor.stop_requested is False
 
 
 def test_stop_terminates_parsed_actions(showui_executor):
@@ -52,10 +90,25 @@ def test_stop_terminates_parsed_actions(showui_executor):
         ' {"action": "stop"},'
         ' {"action": "input", "value": "ignored"}]'
     )
-    # click should map to move + click, but input after stop should be ignored
+
     assert parsed == [
         {"action": "mouse_move", "text": None, "coordinate": (80, 60)},
         {"action": "left_click", "text": None, "coordinate": None},
+    ]
+    assert showui_executor.stop_requested is True
+
+
+def test_stop_flag_resets_after_follow_up_parse(showui_executor):
+    stop_actions = showui_executor._parse_showui_output(str([{"action": "STOP"}]))
+    assert stop_actions == []
+    assert showui_executor.stop_requested is True
+
+    follow_up_actions = showui_executor._parse_showui_output(
+        str([{"action": "hover", "position": [0.0, 0.0]}])
+    )
+    assert showui_executor.stop_requested is False
+    assert follow_up_actions == [
+        {"action": "mouse_move", "text": None, "coordinate": (0, 0)}
     ]
 
 
@@ -69,6 +122,7 @@ def test_scroll_includes_horizontal_directions(showui_executor):
             "text": None,
             "coordinate": (50, 75),
             "scroll_direction": "left",
+            "scroll_amount": 10,
         }
     ]
 
