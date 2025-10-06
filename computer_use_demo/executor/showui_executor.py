@@ -1,5 +1,6 @@
 import ast
 import asyncio
+import json
 import uuid
 from collections.abc import Callable
 from typing import Any, Dict, List, Union, cast
@@ -38,19 +39,18 @@ class ShowUIExecutor:
             ComputerTool(selected_screen=selected_screen, is_scaling=False)
         )
 
-        # Supported actions emitted by ShowUI or UI-TARS. We only need
-        # membership checks, so keep them in a set.
+        # Supported actions emitted by ShowUI or UI-TARS.
         self.supported_action_type = {
-            "CLICK",
-            "INPUT",
-            "ENTER",
-            "ESC",
-            "ESCAPE",
-            "PRESS",
-            "HOVER",
-            "SCROLL",
-            "HOTKEY",
-            "STOP",
+            "CLICK": "mouse",
+            "HOVER": "mouse",
+            "INPUT": "type",
+            "ENTER": "key",
+            "ESC": "key",
+            "ESCAPE": "key",
+            "PRESS": "mouse",
+            "SCROLL": "scroll",
+            "HOTKEY": "key",
+            "STOP": None,
         }
         # Track whether a terminating action (like STOP) was observed so the
         # caller can decide to exit any action loop safely.
@@ -60,10 +60,13 @@ class ShowUIExecutor:
         # response is expected to be :
         # {'content': "{'action': 'CLICK', 'value': None, 'position': [0.83, 0.15]}, ...", 'role': 'assistant'},
 
-        action_dict = self._format_actor_output(response)  # str -> dict
+        action_dict = self._format_actor_output(response)
+        if not action_dict:
+            return None
 
-        actions = action_dict["content"]
-        role = action_dict["role"]
+        actions = action_dict.get("content")
+        if actions is None:
+            return None
 
         # Parse the actions from showui
         action_list = self._parse_showui_output(actions)
@@ -75,12 +78,20 @@ class ShowUIExecutor:
 
             for action in action_list:  # Execute the tool (adapting the code from anthropic_executor.py)
 
-                tool_result_content: list[BetaToolResultBlockParam] = []
+                tool_result_content = []
 
                 self.output_callback(f"{colorful_text_showui}:\n{action}", sender="bot")
                 print("Converted Action:", action)
 
-                tool_input: dict[str, Any] = dict(action)
+                tool_input: Dict[str, Any] = {
+                    "action": action["action"],
+                    "text": action.get("text"),
+                    "coordinate": action.get("coordinate"),
+                }
+                if "scroll_direction" in action:
+                    tool_input["scroll_direction"] = action["scroll_direction"]
+                if "scroll_amount" in action:
+                    tool_input["scroll_amount"] = action["scroll_amount"]
 
                 sim_content_block = BetaToolUseBlock(
                     id=f"toolu_{uuid.uuid4()}",
@@ -106,27 +117,39 @@ class ShowUIExecutor:
                 tool_result_content.append(
                     _make_api_tool_result(result, sim_content_block.id)
                 )
-                # print(f"executor: tool_result_content: {tool_result_content}")
                 self.tool_output_callback(result, sim_content_block.id)
 
                 # Craft messages based on the content_block
-                # Note: to display the messages in the gradio, you should organize the messages in the following way (user message, bot message)
                 display_messages = _message_display_callback(messages)
-                # Send the messages to the gradio
                 for user_msg, bot_msg in display_messages:
                     yield [user_msg, bot_msg], tool_result_content
 
         return tool_result_content
 
-    def _format_actor_output(self, action_output: str | dict) -> Dict[str, Any]:
+    def _format_actor_output(self, action_output: str | dict) -> Dict[str, Any] | None:
         if isinstance(action_output, dict):
             return action_output
+
+        if not isinstance(action_output, str):
+            print(f"Unexpected action output type: {type(action_output)}")
+            return None
+
+        text_output = action_output.strip()
+
+        if not text_output:
+            print("Empty action output received from ShowUI actor.")
+            return None
+
         try:
-            action_output.replace("'", '\"')
-            action_dict = ast.literal_eval(action_output)
-            return action_dict
-        except Exception as e:
-            print(f"Error parsing action output: {e}")
+            return json.loads(text_output)
+        except json.JSONDecodeError:
+            pass
+
+        try:
+            sanitized_output = self._json_literals_to_python(text_output)
+            return ast.literal_eval(sanitized_output)
+        except (ValueError, SyntaxError) as exc:
+            print(f"Error parsing action output: {exc}")
             return None
 
     def _parse_showui_output(self, output_text: str) -> Union[List[Dict[str, Any]], None]:
@@ -143,7 +166,11 @@ class ShowUIExecutor:
 
             print("Output Text:", output_text)
 
-            parsed_output = ast.literal_eval(output_text)
+            try:
+                parsed_output = json.loads(output_text)
+            except json.JSONDecodeError:
+                sanitized_output = self._json_literals_to_python(output_text)
+                parsed_output = ast.literal_eval(sanitized_output)
 
             print("Parsed Output:", parsed_output)
 
@@ -158,8 +185,8 @@ class ShowUIExecutor:
             # reset termination flag for a new batch of actions
             self.stop_requested = False
 
-            # refine key: value pairs, mapping to the Anthropic's format
-            refined_output: list[dict[str, Any]] = []
+            refined_output: list[Dict[str, Any]] = []
+            stop_encountered = False
 
             def _maybe_resolve_coordinate(action_item: Dict[str, Any]):
                 if action_item.get("position") is None:
@@ -172,7 +199,7 @@ class ShowUIExecutor:
 
                 print("Action Item:", action_item)
                 # sometime showui returns lower case action names
-                action_name = action_item.get("action", "").upper()
+                action_name = (action_item.get("action") or "").upper()
                 action_item["action"] = action_name
 
                 if action_name not in self.supported_action_type:
@@ -181,10 +208,7 @@ class ShowUIExecutor:
                     )
 
                 if action_name == "STOP":
-                    # Signal that execution should stop. We keep any already
-                    # generated actions so the caller can finish the current run
-                    # but mark that ShowUI requested a stop.
-                    self.stop_requested = True
+                    stop_encountered = True
                     break
 
                 if action_name == "CLICK":  # click -> mouse_move + left_click
@@ -264,6 +288,10 @@ class ShowUIExecutor:
 
                     refined_output.append({"action": "key", "text": hotkey_text, "coordinate": None})
 
+            if stop_encountered:
+                self.stop_requested = True
+                return refined_output
+
             return refined_output
 
         except Exception as e:
@@ -290,13 +318,13 @@ class ShowUIExecutor:
         position_source = (action_item.get("position_source") or "").lower()
         source = (action_item.get("source") or "").lower()
 
-        is_ui_tars = any(tag in {"ui-tars", "ui_tars"} for tag in (position_mode, position_source, source))
-
         is_absolute = bool(action_item.get("is_absolute")) or position_mode == "absolute"
-        if position_source in {"absolute", "ui-tars", "ui_tars"}:
+        if position_source in {"absolute"}:
             is_absolute = True
-        if source and source in {"ui-tars", "ui_tars"}:
+        if source in {"absolute"}:
             is_absolute = True
+        if position_mode in {"normalized", "relative"}:
+            is_absolute = False
 
         if not is_absolute and (x_value > 1 or y_value > 1 or x_value < 0 or y_value < 0):
             is_absolute = True
@@ -306,16 +334,24 @@ class ShowUIExecutor:
         width = self.screen_bbox[2] - self.screen_bbox[0]
         height = self.screen_bbox[3] - self.screen_bbox[1]
 
-        if is_ui_tars:
-            return int(round(x_value)), int(round(y_value))
+        if width <= 0 or height <= 0:
+            raise ValueError("Invalid screen bounds returned from monitor lookup.")
 
         if is_absolute:
-            return int(round(x_value)) + x_offset, int(round(y_value)) + y_offset
+            x_px = int(round(x_value))
+            y_px = int(round(y_value))
+            return x_px + x_offset, y_px + y_offset
 
-        return (
-            int(round(x_value * width)) + x_offset,
-            int(round(y_value * height)) + y_offset,
-        )
+        x_clamped = max(0.0, min(1.0, x_value))
+        y_clamped = max(0.0, min(1.0, y_value))
+
+        x_px = int(round(x_clamped * width))
+        y_px = int(round(y_clamped * height))
+
+        x_px = min(max(x_px, 0), width - 1)
+        y_px = min(max(y_px, 0), height - 1)
+
+        return x_px + x_offset, y_px + y_offset
 
     def _get_screen_resolution(self):
         from screeninfo import get_monitors
@@ -387,6 +423,58 @@ class ShowUIExecutor:
 
         return bbox
 
+    def _json_literals_to_python(self, text: str) -> str:
+        """Convert JSON literal tokens to Python equivalents without touching quoted strings."""
+
+        def is_escaped(idx: int) -> bool:
+            backslash_count = 0
+            j = idx - 1
+            while j >= 0 and text[j] == "\\":
+                backslash_count += 1
+                j -= 1
+            return backslash_count % 2 == 1
+
+        result: list[str] = []
+        in_single_quote = False
+        in_double_quote = False
+        i = 0
+        length = len(text)
+
+        while i < length:
+            ch = text[i]
+
+            if ch == "'" and not in_double_quote and not is_escaped(i):
+                in_single_quote = not in_single_quote
+                result.append(ch)
+                i += 1
+                continue
+
+            if ch == '"' and not in_single_quote and not is_escaped(i):
+                in_double_quote = not in_double_quote
+                result.append(ch)
+                i += 1
+                continue
+
+            if not in_single_quote and not in_double_quote:
+                if text.startswith("null", i):
+                    result.append("None")
+                    i += 4
+                    continue
+                if text.startswith("true", i):
+                    result.append("True")
+                    i += 4
+                    continue
+                if text.startswith("false", i):
+                    result.append("False")
+                    i += 5
+                    continue
+
+            result.append(ch)
+            i += 1
+
+        return ''.join(result)
+
+
 
 def _message_display_callback(messages):
     display_messages = []
@@ -406,7 +494,6 @@ def _message_display_callback(messages):
                 )  # Bot message
             else:
                 pass
-                # print(msg["content"][0])
         except Exception as e:
             print("error", e)
             pass
@@ -453,73 +540,3 @@ def _maybe_prepend_system_tool_result(result: ToolResult, result_text: str):
     if result.system:
         result_text = f"<system>{result.system}</system>\n{result_text}"
     return result_text
-
-
-# Testing main function
-if __name__ == "__main__":
-    def output_callback(content_block):
-        # print("Output Callback:", content_block)
-        pass
-
-    def tool_output_callback(result, action):
-        print("[showui_executor] Tool Output Callback:", result, action)
-        pass
-
-    # Instantiate the executor
-    executor = ShowUIExecutor(
-        output_callback=output_callback,
-        tool_output_callback=tool_output_callback,
-        selected_screen=0,
-    )
-
-    # test inputs
-    response_content = "{'content': \"{'action': 'CLICK', 'value': None, 'position': [0.49, 0.18]}\", 'role': 'assistant'}"
-    # response_content = {'content': "{'action': 'CLICK', 'value': None, 'position': [0.49, 0.39]}", 'role': 'assistant'}
-    # response_content = "{'content': \"{'action': 'CLICK', 'value': None, 'position': [0.49, 0.42]}, {'action': 'INPUT', 'value': 'weather for New York city', 'position': [0.49, 0.42]}, {'action': 'ENTER', 'value': None, 'position': None}\", 'role': 'assistant'}"
-
-    # Initialize messages
-    messages = []
-
-    # Call the executor
-    print("Testing ShowUIExecutor with response content:", response_content)
-    for message, tool_result_content in executor(response_content, messages):
-        print("Message:", message)
-        print("Tool Result Content:", tool_result_content)
-
-    # Display final messages
-    print("\nFinal messages:")
-    for msg in messages:
-        print(msg)
-
-    [
-        {
-            "role": "user",
-            "content": [
-                "open a new tab and go to amazon.com",
-                "tmp/outputs/screenshot_b4a1b7e60a5c47359bedbd8707573966.png",
-            ],
-        },
-        {"role": "assistant", "content": ["History Action: {'action': 'mouse_move', 'text': None, 'coordinate': (1216, 88)}"]},
-        {"role": "assistant", "content": ["History Action: {'action': 'left_click', 'text': None, 'coordinate": None}"]},
-        {
-            "content": [
-                {
-                    "type": "tool_result",
-                    "content": [
-                        {"type": "text", "text": "Moved mouse to (1216, 88)"}
-                    ],
-                    "tool_use_id": "toolu_ae4f2886-366c-4789-9fa6-ec13461cef12",
-                    "is_error": False,
-                },
-                {
-                    "type": "tool_result",
-                    "content": [
-                        {"type": "text", "text": "Performed left_click"}
-                    ],
-                    "tool_use_id": "toolu_a7377954-e1b7-4746-9757-b2eb4dcddc82",
-                    "is_error": False,
-                },
-            ],
-            "role": "user",
-        },
-    ]

@@ -37,6 +37,7 @@ def showui_executor():
 def test_supported_actions_include_stop_and_hotkey(showui_executor):
     assert "STOP" in showui_executor.supported_action_type
     assert "HOTKEY" in showui_executor.supported_action_type
+    assert showui_executor.supported_action_type["HOTKEY"] == "key"
 
 
 def test_parse_hotkey_into_key_action(showui_executor):
@@ -170,37 +171,35 @@ def test_absolute_coordinates_shifted_by_screen_offset():
     ]
 
 
-def test_ui_tars_source_skips_screen_offset():
-    with patch.object(ShowUIExecutor, "_get_screen_resolution", return_value=(100, 200, 1100, 1200)):
-        with patch("computer_use_demo.executor.showui_executor.ComputerTool", DummyComputerTool):
-            executor = ShowUIExecutor(
-                output_callback=lambda *_: None,
-                tool_output_callback=lambda *_: None,
-                selected_screen=0,
-            )
-
-    parsed = executor._parse_showui_output(
-        str(
-            [
-                {
-                    "action": "click",
-                    "position": [150, 250],
-                    "source": "UI-TARS",
-                }
-            ]
-        )
+def test_ui_tars_normalized_positions_are_scaled(showui_executor):
+    parsed = showui_executor._parse_showui_output(
+        '[{"action": "click", "position": [0.5, 0.5], "position_mode": "normalized", "position_source": "ui-tars"}]'
     )
 
     assert parsed == [
-        {"action": "mouse_move", "text": None, "coordinate": (150, 250)},
+        {"action": "mouse_move", "text": None, "coordinate": (100, 50)},
         {"action": "left_click", "text": None, "coordinate": None},
     ]
 
 
-def test_convert_ui_tars_action_includes_source_flag():
-    json_payload = convert_ui_tars_action_to_json("Action: click(start_box='(153,97)')")
+def test_convert_ui_tars_action_includes_source_flag_and_normalizes():
+    json_payload = convert_ui_tars_action_to_json(
+        "Action: click(start_box='(960,540)')",
+        screenshot_size=(1920, 1080),
+    )
     parsed = json.loads(json_payload)
 
     assert parsed["source"] == "UI-TARS"
     assert parsed["position_source"] == "ui-tars"
+    assert parsed["action"] == "CLICK"
+    assert parsed["position_mode"] == "normalized"
+    assert parsed["position"] == [0.5, 0.5]
+
+
+def test_convert_ui_tars_action_absolute_when_size_missing():
+    json_payload = convert_ui_tars_action_to_json("Action: click(start_box='(153,97)')")
+    parsed = json.loads(json_payload)
+
     assert parsed["position"] == [153, 97]
+    assert parsed["position_mode"] == "absolute"
+    assert parsed["source"] == "UI-TARS"

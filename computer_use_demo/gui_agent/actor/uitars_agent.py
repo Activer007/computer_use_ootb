@@ -1,5 +1,7 @@
 import json
 import re
+from typing import Tuple
+
 from openai import OpenAI
 
 from computer_use_demo.gui_agent.llm_utils.oai import encode_image
@@ -46,8 +48,12 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 
         # take screenshot
         screenshot, screenshot_path = get_screenshot(
-            selected_screen=self.selected_screen, resize=True, target_width=1920, target_height=1080
+            selected_screen=self.selected_screen,
+            resize=True,
+            target_width=1920,
+            target_height=1080,
         )
+        screenshot_width, screenshot_height = screenshot.size
         screenshot_path = str(screenshot_path)
         screenshot_base64 = encode_image(screenshot_path)
 
@@ -70,44 +76,39 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
         )
 
         ui_tars_action = response.choices[0].message.content
-        converted_action = convert_ui_tars_action_to_json(ui_tars_action)
+        converted_action = convert_ui_tars_action_to_json(
+            ui_tars_action,
+            screenshot_size=(screenshot_width, screenshot_height),
+        )
         response = str(converted_action)
 
         response = {"content": response, "role": "assistant"}
         return response
 
 
-def convert_ui_tars_action_to_json(action_str: str) -> str:
-    """
-    Converts an action line such as:
-      Action: click(start_box='(153,97)')
-    into a JSON string of the form:
-      {
-        "action": "CLICK",
-        "value": null,
-        "position": [153, 97]
-      }
-    """
+def convert_ui_tars_action_to_json(
+    action_str: str,
+    screenshot_size: Tuple[int, int] | None = None,
+) -> str:
+    """Convert a UI-TARS action line into the ShowUI JSON schema."""
 
-    # Strip leading/trailing whitespace and remove "Action: " prefix if present
     action_str = action_str.strip()
     if action_str.startswith("Action:"):
         action_str = action_str[len("Action:") :].strip()
 
-    # Mappings from old action names to the new action schema
-    ACTION_MAP = {
+    action_map = {
         "click": "CLICK",
+        "hover": "HOVER",
+        "press": "PRESS",
         "type": "INPUT",
         "scroll": "SCROLL",
-        "wait": "STOP",  # TODO: deal with "wait()"
+        "wait": "STOP",
         "finished": "STOP",
         "call_user": "STOP",
-        "hotkey": "HOTKEY",  # We break down the actual key below (Enter, Esc, etc.)
+        "hotkey": "HOTKEY",
     }
 
-    # Prepare a structure for the final JSON
-    # Default to no position and null value
-    output_dict = {
+    payload: dict[str, object] = {
         "action": None,
         "value": None,
         "position": None,
@@ -115,59 +116,58 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
         "source": "UI-TARS",
     }
 
-    # 1) CLICK(...) e.g. click(start_box='(153,97)')
-    match_click = re.match(r"^click\(start_box='\(?(\d+),\s*(\d+)\)?'\)$", action_str)
-    if match_click:
-        x, y = match_click.groups()
-        output_dict["action"] = ACTION_MAP["click"]
-        output_dict["position"] = [int(x), int(y)]
-        output_dict["position_mode"] = "absolute"
-        return json.dumps(output_dict)
+    def _encode_position(raw_x: int, raw_y: int) -> tuple[list[float] | list[int], str]:
+        if screenshot_size:
+            width, height = screenshot_size
+            if width > 0 and height > 0:
+                clamped_x = max(0, min(int(raw_x), width - 1))
+                clamped_y = max(0, min(int(raw_y), height - 1))
+                return [clamped_x / width, clamped_y / height], "normalized"
+        return [int(raw_x), int(raw_y)], "absolute"
 
-    # 2) HOTKEY(...) e.g. hotkey(key='Enter')
-    match_hotkey = re.match(r"^hotkey\(key='([^']+)'\)$", action_str)
-    if match_hotkey:
-        key = match_hotkey.group(1).lower()
-        if key == "enter":
-            output_dict["action"] = "ENTER"
-        elif key == "esc":
-            output_dict["action"] = "ESC"
+    position_match = re.match(r"^(click|hover|press)\(start_box='\(?(\d+),\s*(\d+)\)?'\)$", action_str)
+    if position_match:
+        action_name, x, y = position_match.groups()
+        payload["action"] = action_map[action_name]
+        position, mode = _encode_position(int(x), int(y))
+        payload["position"] = position
+        if mode == "absolute":
+            payload["position_mode"] = "absolute"
         else:
-            # Otherwise treat it as some generic hotkey
-            output_dict["action"] = ACTION_MAP["hotkey"]
-            output_dict["value"] = key
-        return json.dumps(output_dict)
+            payload["position_mode"] = "normalized"
+        return json.dumps(payload)
 
-    # 3) TYPE(...) e.g. type(content='some text')
-    match_type = re.match(r"^type\(content='([^']*)'\)$", action_str)
-    if match_type:
-        typed_content = match_type.group(1)
-        output_dict["action"] = ACTION_MAP["type"]
-        output_dict["value"] = typed_content
-        # If you want a position (x,y) you need it in your string. Otherwise it's omitted.
-        return json.dumps(output_dict)
+    hotkey_match = re.match(r"^hotkey\(key='([^']+)'\)$", action_str)
+    if hotkey_match:
+        key = hotkey_match.group(1).lower()
+        if key == "enter":
+            payload["action"] = "ENTER"
+        elif key == "esc":
+            payload["action"] = "ESC"
+        else:
+            payload["action"] = action_map["hotkey"]
+            payload["value"] = key
+        return json.dumps(payload)
 
-    # 4) SCROLL(...) e.g. scroll(start_box='(153,97)', direction='down')
-    match_scroll = re.match(
+    type_match = re.match(r"^type\(content='([^']*)'\)$", action_str)
+    if type_match:
+        payload["action"] = action_map["type"]
+        payload["value"] = type_match.group(1)
+        return json.dumps(payload)
+
+    scroll_match = re.match(
         r"^scroll\(start_box='[^']*'\s*,\s*direction='(down|up|left|right)'\)$",
         action_str,
     )
-    if match_scroll:
-        direction = match_scroll.group(1)
-        output_dict["action"] = ACTION_MAP["scroll"]
-        output_dict["value"] = direction
-        return json.dumps(output_dict)
+    if scroll_match:
+        payload["action"] = action_map["scroll"]
+        payload["value"] = scroll_match.group(1)
+        return json.dumps(payload)
 
-    # 5) WAIT() or FINISHED() or CALL_USER() etc.
-    if action_str in ["wait()", "finished()", "call_user()"]:
+    if action_str in {"wait()", "finished()", "call_user()"}:
         base_action = action_str.replace("()", "")
-        if base_action in ACTION_MAP:
-            output_dict["action"] = ACTION_MAP[base_action]
-        else:
-            output_dict["action"] = "STOP"
-        return json.dumps(output_dict)
+        payload["action"] = action_map.get(base_action, "STOP")
+        return json.dumps(payload)
 
-    # If none of the above patterns matched, you can decide how to handle
-    # unknown or unexpected action lines:
-    output_dict["action"] = "STOP"
-    return json.dumps(output_dict)
+    payload["action"] = "STOP"
+    return json.dumps(payload)
