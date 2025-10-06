@@ -1,7 +1,7 @@
 import ast
 import asyncio
-from collections.abc import Callable
 import uuid
+from collections.abc import Callable
 from typing import Any, Dict, List, Union, cast
 
 from anthropic.types import TextBlock
@@ -38,7 +38,7 @@ class ShowUIExecutor:
             ComputerTool(selected_screen=selected_screen, is_scaling=False)
         )
 
-        # Supported actions emitted by ShowUI or UI-TARS.  We only need
+        # Supported actions emitted by ShowUI or UI-TARS. We only need
         # membership checks, so keep them in a set.
         self.supported_action_type = {
             "CLICK",
@@ -164,7 +164,9 @@ class ShowUIExecutor:
             def _maybe_resolve_coordinate(action_item: Dict[str, Any]):
                 if action_item.get("position") is None:
                     return None
-                return self._resolve_coordinate(action_item)
+                coordinate = self._resolve_coordinate(action_item)
+                action_item["position"] = coordinate
+                return coordinate
 
             for action_item in parsed_output:
 
@@ -179,33 +181,33 @@ class ShowUIExecutor:
                     )
 
                 if action_name == "STOP":
-                    # Signal that execution should stop.  We keep any already
+                    # Signal that execution should stop. We keep any already
                     # generated actions so the caller can finish the current run
                     # but mark that ShowUI requested a stop.
                     self.stop_requested = True
                     break
 
-                if action_name == "CLICK":  # 1. click -> mouse_move + left_click
+                if action_name == "CLICK":  # click -> mouse_move + left_click
                     coordinate = _maybe_resolve_coordinate(action_item)
                     if coordinate is not None:
                         refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
                     refined_output.append({"action": "left_click", "text": None, "coordinate": None})
 
-                elif action_name == "INPUT":  # 2. input -> type
+                elif action_name == "INPUT":  # input -> type
                     refined_output.append({"action": "type", "text": action_item.get("value"), "coordinate": None})
 
-                elif action_name == "ENTER":  # 3. enter -> key, enter
+                elif action_name == "ENTER":  # enter -> key, enter
                     refined_output.append({"action": "key", "text": "Enter", "coordinate": None})
 
-                elif action_name in ("ESC", "ESCAPE"):  # 4. escape -> key, escape
+                elif action_name in {"ESC", "ESCAPE"}:  # escape -> key, escape
                     refined_output.append({"action": "key", "text": "Escape", "coordinate": None})
 
-                elif action_name == "HOVER":  # 5. hover -> mouse_move
+                elif action_name == "HOVER":  # hover -> mouse_move
                     coordinate = _maybe_resolve_coordinate(action_item)
                     if coordinate is not None:
                         refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
 
-                elif action_name == "SCROLL":  # 6. scroll -> ComputerTool scroll
+                elif action_name == "SCROLL":  # scroll -> ComputerTool scroll
                     scroll_value = action_item.get("value")
                     scroll_direction = None
                     scroll_amount = 10
@@ -239,7 +241,7 @@ class ShowUIExecutor:
                         }
                     )
 
-                elif action_name == "PRESS":  # 7. press -> mouse_move + left_press
+                elif action_name == "PRESS":  # press -> mouse_move + left_press
                     coordinate = _maybe_resolve_coordinate(action_item)
                     if coordinate is not None:
                         refined_output.append({"action": "mouse_move", "text": None, "coordinate": coordinate})
@@ -284,17 +286,28 @@ class ShowUIExecutor:
         except (TypeError, ValueError) as exc:
             raise ValueError(f"Position values must be numeric: {position}") from exc
 
-        # Determine if the position is already in absolute pixel coordinates.
-        position_mode = (action_item.get("position_mode") or action_item.get("position_source") or "").lower()
-        is_absolute = position_mode in {"absolute", "ui-tars", "ui_tars"} or bool(action_item.get("is_absolute"))
+        position_mode = (action_item.get("position_mode") or "").lower()
+        position_source = (action_item.get("position_source") or "").lower()
+        source = (action_item.get("source") or "").lower()
 
-        if not is_absolute and (x_value > 1 or y_value > 1):
+        is_ui_tars = any(tag in {"ui-tars", "ui_tars"} for tag in (position_mode, position_source, source))
+
+        is_absolute = bool(action_item.get("is_absolute")) or position_mode == "absolute"
+        if position_source in {"absolute", "ui-tars", "ui_tars"}:
+            is_absolute = True
+        if source and source in {"ui-tars", "ui_tars"}:
+            is_absolute = True
+
+        if not is_absolute and (x_value > 1 or y_value > 1 or x_value < 0 or y_value < 0):
             is_absolute = True
 
         x_offset = self.screen_bbox[0]
         y_offset = self.screen_bbox[1]
         width = self.screen_bbox[2] - self.screen_bbox[0]
         height = self.screen_bbox[3] - self.screen_bbox[1]
+
+        if is_ui_tars:
+            return int(round(x_value)), int(round(y_value))
 
         if is_absolute:
             return int(round(x_value)) + x_offset, int(round(y_value)) + y_offset

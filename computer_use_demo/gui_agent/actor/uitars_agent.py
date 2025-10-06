@@ -3,8 +3,8 @@ import re
 from openai import OpenAI
 
 from computer_use_demo.gui_agent.llm_utils.oai import encode_image
-from computer_use_demo.tools.screen_capture import get_screenshot
 from computer_use_demo.tools.logger import logger, truncate_string
+from computer_use_demo.tools.screen_capture import get_screenshot
 
 
 class UITARS_Actor:
@@ -40,13 +40,14 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
 
         self.grounding_system_prompt = self._NAV_SYSTEM_GROUNDING.format()
 
-
     def __call__(self, messages):
 
         task = messages
-        
+
         # take screenshot
-        screenshot, screenshot_path = get_screenshot(selected_screen=self.selected_screen, resize=True, target_width=1920, target_height=1080)
+        screenshot, screenshot_path = get_screenshot(
+            selected_screen=self.selected_screen, resize=True, target_width=1920, target_height=1080
+        )
         screenshot_path = str(screenshot_path)
         screenshot_base64 = encode_image(screenshot_path)
 
@@ -56,23 +57,24 @@ call_user() # Submit the task and call the user when the task is unsolvable, or 
             model="ui-tars",
             messages=[
                 {"role": "system", "content": self.grounding_system_prompt},
-                {"role": "user", "content": [
-                    {"type": "text", "text": task},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}}
-                    ]
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": task},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{screenshot_base64}"}},
+                    ],
                 },
-                ],
+            ],
             max_tokens=256,
-            temperature=0
-            )
-        
+            temperature=0,
+        )
+
         ui_tars_action = response.choices[0].message.content
         converted_action = convert_ui_tars_action_to_json(ui_tars_action)
         response = str(converted_action)
 
-        response = {'content': response, 'role': 'assistant'}
+        response = {"content": response, "role": "assistant"}
         return response
-
 
 
 def convert_ui_tars_action_to_json(action_str: str) -> str:
@@ -86,21 +88,21 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
         "position": [153, 97]
       }
     """
-    
+
     # Strip leading/trailing whitespace and remove "Action: " prefix if present
     action_str = action_str.strip()
     if action_str.startswith("Action:"):
-        action_str = action_str[len("Action:"):].strip()
+        action_str = action_str[len("Action:") :].strip()
 
     # Mappings from old action names to the new action schema
     ACTION_MAP = {
         "click": "CLICK",
         "type": "INPUT",
         "scroll": "SCROLL",
-        "wait": "STOP",        # TODO: deal with "wait()"
+        "wait": "STOP",  # TODO: deal with "wait()"
         "finished": "STOP",
         "call_user": "STOP",
-        "hotkey": "HOTKEY",    # We break down the actual key below (Enter, Esc, etc.)
+        "hotkey": "HOTKEY",  # We break down the actual key below (Enter, Esc, etc.)
     }
 
     # Prepare a structure for the final JSON
@@ -110,6 +112,7 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
         "value": None,
         "position": None,
         "position_source": "ui-tars",
+        "source": "UI-TARS",
     }
 
     # 1) CLICK(...) e.g. click(start_box='(153,97)')
@@ -145,10 +148,9 @@ def convert_ui_tars_action_to_json(action_str: str) -> str:
         return json.dumps(output_dict)
 
     # 4) SCROLL(...) e.g. scroll(start_box='(153,97)', direction='down')
-    #    or scroll(start_box='...', direction='down')
     match_scroll = re.match(
         r"^scroll\(start_box='[^']*'\s*,\s*direction='(down|up|left|right)'\)$",
-        action_str
+        action_str,
     )
     if match_scroll:
         direction = match_scroll.group(1)

@@ -1,7 +1,10 @@
-import pytest
+import json
 from unittest.mock import patch
 
+import pytest
+
 from computer_use_demo.executor.showui_executor import ShowUIExecutor
+from computer_use_demo.gui_agent.actor.uitars_agent import convert_ui_tars_action_to_json
 from computer_use_demo.tools import ToolResult
 
 
@@ -165,3 +168,39 @@ def test_absolute_coordinates_shifted_by_screen_offset():
         {"action": "mouse_move", "text": None, "coordinate": (250, 90)},
         {"action": "left_click", "text": None, "coordinate": None},
     ]
+
+
+def test_ui_tars_source_skips_screen_offset():
+    with patch.object(ShowUIExecutor, "_get_screen_resolution", return_value=(100, 200, 1100, 1200)):
+        with patch("computer_use_demo.executor.showui_executor.ComputerTool", DummyComputerTool):
+            executor = ShowUIExecutor(
+                output_callback=lambda *_: None,
+                tool_output_callback=lambda *_: None,
+                selected_screen=0,
+            )
+
+    parsed = executor._parse_showui_output(
+        str(
+            [
+                {
+                    "action": "click",
+                    "position": [150, 250],
+                    "source": "UI-TARS",
+                }
+            ]
+        )
+    )
+
+    assert parsed == [
+        {"action": "mouse_move", "text": None, "coordinate": (150, 250)},
+        {"action": "left_click", "text": None, "coordinate": None},
+    ]
+
+
+def test_convert_ui_tars_action_includes_source_flag():
+    json_payload = convert_ui_tars_action_to_json("Action: click(start_box='(153,97)')")
+    parsed = json.loads(json_payload)
+
+    assert parsed["source"] == "UI-TARS"
+    assert parsed["position_source"] == "ui-tars"
+    assert parsed["position"] == [153, 97]
