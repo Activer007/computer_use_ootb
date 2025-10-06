@@ -226,6 +226,10 @@ def process_input(user_input, state):
     yield state['chatbot_messages']  # Yield to update the chatbot UI with the user's message
 
     # Run sampling_loop_sync with the chatbot_output_callback
+    logger.info(
+        "Calling sampling_loop_sync with system_prompt_suffix: %s",
+        truncate_string(state["custom_system_prompt"]),
+    )
     for loop_msg in sampling_loop_sync(
         system_prompt_suffix=state["custom_system_prompt"],
         planner_model=state["planner_model"],
@@ -596,7 +600,15 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         return gr.update(value=api_key_value, placeholder=placeholder, **update_kwargs)
 
     def update_system_prompt_suffix(system_prompt_suffix, state):
+        previous_prompt = state.get("custom_system_prompt", "")
         state["custom_system_prompt"] = system_prompt_suffix
+        logger.info(
+            "System prompt suffix updated from %s to %s",
+            truncate_string(previous_prompt),
+            truncate_string(system_prompt_suffix),
+        )
+        if previous_prompt and previous_prompt != system_prompt_suffix:
+            logger.info("Custom system prompt has been overwritten with new user input.")
         
     # When showui_config changes, we set the max_pixels and awq_4bit accordingly.
     def handle_showui_config_change(showui_config_val, state):
@@ -708,6 +720,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     # chat_input.submit(process_input, [chat_input, state], chatbot)
     submit_button.click(process_input, [chat_input, state], chatbot)
+    custom_prompt.change(update_system_prompt_suffix, [custom_prompt, state], None)
 
     planner_api_key.change(
         fn=update_api_key,
