@@ -500,7 +500,7 @@ if __name__ == "__main__":
             ],
         },
         {"role": "assistant", "content": ["History Action: {'action': 'mouse_move', 'text': None, 'coordinate': (1216, 88)}"]},
-        {"role": "assistant", "content": ["History Action: {'action': 'left_click', 'text': None, 'coordinate': None}"]},
+        {"role": "assistant", "content": ["History Action: {'action': 'left_click', 'text': None, 'coordinate": None}"]},
         {
             "content": [
                 {
