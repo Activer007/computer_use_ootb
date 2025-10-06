@@ -33,6 +33,14 @@ from computer_use_demo.loop import APIProvider, sampling_loop_sync
 
 from computer_use_demo.tools import ToolResult
 from computer_use_demo.tools.computer import get_screen_details
+from computer_use_demo.tools.hardware import (
+    build_performance_plot_data,
+    check_showui_assets,
+    detect_accelerator,
+    gather_resource_metrics,
+    recommend_showui_profile,
+    summarise_recommendations,
+)
 SCREEN_NAMES, SELECTED_SCREEN_INDEX = get_screen_details()
 
 API_KEY_FILE = "./api_keys.json"
@@ -110,12 +118,26 @@ def setup_state(state):
     if 'chatbot_messages' not in state:
         state['chatbot_messages'] = []
         
+    if "hardware_info" not in state:
+        state["hardware_info"] = detect_accelerator()
+    if "showui_model_manifest" not in state:
+        state["showui_model_manifest"] = check_showui_assets()
+    if "showui_recommendation" not in state:
+        state["showui_recommendation"] = recommend_showui_profile(state["hardware_info"])
+
+    recommendation = state["showui_recommendation"]
+
+    if "showui_summary" not in state:
+        state["showui_summary"] = summarise_recommendations(
+            state["hardware_info"], recommendation, state["showui_model_manifest"]
+        )
+
     if "showui_config" not in state:
-        state["showui_config"] = "Default"
+        state["showui_config"] = recommendation["preset"]
     if "max_pixels" not in state:
-        state["max_pixels"] = 1344
+        state["max_pixels"] = recommendation["max_pixels"]
     if "awq_4bit" not in state:
-        state["awq_4bit"] = False
+        state["awq_4bit"] = recommendation["awq_4bit"]
     if "showui_split" not in state:
         state["showui_split"] = "desktop"
 
@@ -380,7 +402,10 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 showui_config = gr.Dropdown(
                     label="ShowUI Preset Configuration",
                     choices=["Default (Maximum)", "Medium", "Minimal", "Custom"],
-                    value="Default (Maximum)",
+                    value=state.value.get(
+                        "showui_config",
+                        state.value.get("showui_recommendation", {}).get("preset", "Default (Maximum)"),
+                    ),
                     interactive=True,
                 )
             with gr.Column():
@@ -389,15 +414,41 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                     minimum=720,
                     maximum=1344,
                     step=16,
-                    value=1344,
+                    value=state.value.get("max_pixels", 1344),
                     interactive=False,
                 )
             with gr.Column():
                 awq_4bit = gr.Checkbox(
                     label="Enable AWQ-4bit Model",
-                    value=False,
+                    value=state.value.get("awq_4bit", False),
                     interactive=False
                 )
+
+        with gr.Row():
+            hardware_status = gr.JSON(
+                label="GPU/MPS Detection",
+                value=state.value.get("hardware_info", {}),
+            )
+            model_inventory = gr.JSON(
+                label="Local ShowUI Assets",
+                value=state.value.get("showui_model_manifest", {}),
+            )
+
+        with gr.Row():
+            performance_plot = gr.BarPlot(
+                label="Resource Snapshot (%)",
+                value=build_performance_plot_data(gather_resource_metrics()),
+                x="Resource",
+                y="Utilisation",
+                y_lim=[0, 100],
+                tooltip="Live CPU/GPU utilisation helps you pick the right preset.",
+            )
+            tuning_markdown = gr.Markdown(value=state.value.get("showui_summary", ""))
+
+        with gr.Row():
+            refresh_detection = gr.Button("Refresh Environment Check", variant="secondary")
+            refresh_metrics = gr.Button("Refresh Performance Snapshot")
+            apply_recommendation_btn = gr.Button("Apply Suggested Preset", variant="primary")
             
     # Define the merged dictionary with task mappings
     merged_dict = json.load(open("assets/examples/ootb_examples.json", "r"))
@@ -570,10 +621,45 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
         logger.info(f"Updated state: model={state['planner_model']}, provider={state['planner_api_provider']}, api_key={state['api_key']}")
         return provider_update, api_key_update, actor_model_update
-    
+
     def update_actor_model(actor_model_selection, state):
         state["actor_model"] = actor_model_selection
         logger.info(f"Actor model updated to: {state['actor_model']}")
+
+    def refresh_environment(state):
+        state["hardware_info"] = detect_accelerator()
+        state["showui_model_manifest"] = check_showui_assets()
+        state["showui_recommendation"] = recommend_showui_profile(state["hardware_info"])
+        state["showui_summary"] = summarise_recommendations(
+            state["hardware_info"], state["showui_recommendation"], state["showui_model_manifest"]
+        )
+        metrics = gather_resource_metrics()
+        return (
+            state["hardware_info"],
+            state["showui_model_manifest"],
+            gr.update(value=build_performance_plot_data(metrics)),
+            state["showui_summary"],
+        )
+
+    def refresh_performance_plot(state):
+        metrics = gather_resource_metrics()
+        return gr.update(value=build_performance_plot_data(metrics))
+
+    def apply_recommendation(state):
+        recommendation = state.get("showui_recommendation") or recommend_showui_profile(state["hardware_info"])
+        state["showui_config"] = recommendation["preset"]
+        state["max_pixels"] = recommendation["max_pixels"]
+        state["awq_4bit"] = recommendation["awq_4bit"]
+        slider_update, checkbox_update = handle_showui_config_change(recommendation["preset"], state)
+        state["showui_summary"] = summarise_recommendations(
+            state["hardware_info"], recommendation, state["showui_model_manifest"]
+        )
+        return (
+            gr.update(value=recommendation["preset"]),
+            slider_update,
+            checkbox_update,
+            state["showui_summary"],
+        )
 
     def handle_planner_provider_change(provider_value, model_selection, state):
         state["planner_provider"] = provider_value
@@ -626,33 +712,40 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         
     # When showui_config changes, we set the max_pixels and awq_4bit accordingly.
     def handle_showui_config_change(showui_config_val, state):
+        state["showui_config"] = showui_config_val
         if showui_config_val == "Default (Maximum)":
             state["max_pixels"] = 1344
             state["awq_4bit"] = False
             return (
-                gr.update(value=1344, interactive=False), 
+                gr.update(value=1344, interactive=False),
                 gr.update(value=False, interactive=False)
             )
         elif showui_config_val == "Medium":
             state["max_pixels"] = 1024
             state["awq_4bit"] = False
             return (
-                gr.update(value=1024, interactive=False), 
+                gr.update(value=1024, interactive=False),
                 gr.update(value=False, interactive=False)
             )
         elif showui_config_val == "Minimal":
-            state["max_pixels"] = 1024
+            state["max_pixels"] = 960
             state["awq_4bit"] = True
             return (
-                gr.update(value=1024, interactive=False), 
+                gr.update(value=960, interactive=False),
                 gr.update(value=True, interactive=False)
             )
         elif showui_config_val == "Custom":
             # Do not overwrite the current user values, just make them interactive
             return (
-                gr.update(interactive=True), 
+                gr.update(interactive=True),
                 gr.update(interactive=True)
             )
+
+    def update_max_pixels_value(max_pixels_value, state):
+        state["max_pixels"] = int(max_pixels_value)
+
+    def update_awq_checkbox(awq_value, state):
+        state["awq_4bit"] = bool(awq_value)
 
     def update_api_key(api_key_value, state):
         """Handle API key updates"""
@@ -719,10 +812,13 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     only_n_images.change(fn=update_only_n_images, inputs=[only_n_images, state], outputs=None)
     
     # When showui_config changes, we update max_pixels and awq_4bit automatically.
-    showui_config.change(fn=handle_showui_config_change, 
-                         inputs=[showui_config, state], 
+    showui_config.change(fn=handle_showui_config_change,
+                         inputs=[showui_config, state],
                          outputs=[max_pixels, awq_4bit])
-    
+
+    max_pixels.change(fn=update_max_pixels_value, inputs=[max_pixels, state], outputs=None)
+    awq_4bit.change(fn=update_awq_checkbox, inputs=[awq_4bit, state], outputs=None)
+
     # Link callbacks to update dropdowns based on selections
     first_menu.change(fn=update_second_menu, inputs=first_menu, outputs=second_menu)
     second_menu.change(fn=update_third_menu, inputs=[first_menu, second_menu], outputs=third_menu)
@@ -741,6 +837,24 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         fn=update_api_key,
         inputs=[planner_api_key, state],
         outputs=None
+    )
+
+    refresh_detection.click(
+        fn=refresh_environment,
+        inputs=[state],
+        outputs=[hardware_status, model_inventory, performance_plot, tuning_markdown],
+    )
+
+    refresh_metrics.click(
+        fn=refresh_performance_plot,
+        inputs=[state],
+        outputs=performance_plot,
+    )
+
+    apply_recommendation_btn.click(
+        fn=apply_recommendation,
+        inputs=[state],
+        outputs=[showui_config, max_pixels, awq_4bit, tuning_markdown],
     )
 
 demo.launch(share=False,

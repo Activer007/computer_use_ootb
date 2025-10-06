@@ -71,13 +71,21 @@ pip install -r requirements.txt
 
 ### 2.2 (Optional) Get Prepared for **<span style="color:rgb(106, 158, 210)">S</span><span style="color:rgb(111, 163, 82)">h</span><span style="color:rgb(209, 100, 94)">o</span><span style="color:rgb(238, 171, 106)">w</span>UI** Local-Run
 
-1. Download all files of the ShowUI-2B model via the following command. Ensure the `ShowUI-2B` folder is under the `computer_use_ootb` folder.
+1. Run the enhanced installer to download the ShowUI-2B weights and auto-detect your runtime environment:
 
-    ```python
+    ```bash
     python install_tools/install_showui.py
     ```
 
-2. Make sure to install the correct GPU version of PyTorch (CUDA, MPS, etc.) on your machine. See [install guide and verification](https://pytorch.org/get-started/locally/).
+    The script checks for CUDA/MPS support, recommends the correct PyTorch build, installs required Python packages (`transformers`, `accelerate`, `psutil`, `pynvml`, …) and stores a hardware report that is rendered inside the UI.
+
+2. To download the quantised 4-bit weights (recommended for <=10GB VRAM GPUs) simply run:
+
+    ```bash
+    python install_tools/install_showui.py --precision awq-4bit
+    ```
+
+    The legacy wrapper `python install_tools/install_showui-awq-4bit.py` now delegates to the same installer for backwards compatibility.
 
 3. Get API Keys for [GPT-4o](https://platform.openai.com/docs/quickstart) or [Qwen-VL](https://help.aliyun.com/zh/dashscope/developer-reference/acquisition-and-configuration-of-api-key). For mainland China users, Qwen API free trial for first 1 mil tokens is [available](https://help.aliyun.com/zh/dashscope/developer-reference/tongyi-qianwen-vl-plus-api).
 
@@ -124,13 +132,20 @@ Enter the Anthropic API key (you can obtain it through this [website](https://co
 
 ### ShowUI Advanced Settings
 
-We provide a 4-bit quantized ShowUI-2B model for cost-efficient inference (currently **only support CUDA devices**). To download the 4-bit quantized ShowUI-2B model:
+We provide a 4-bit quantized ShowUI-2B model for cost-efficient inference (currently **only support CUDA devices**). Install it via:
 ```
-python install_tools/install_showui-awq-4bit.py
+python install_tools/install_showui.py --precision awq-4bit
 ```
 Then, enable the quantized setting in the 'ShowUI Advanced Settings' dropdown menu.
 
-Besides, we also provide a slider to quickly adjust the `max_pixel` parameter in the ShowUI model. This controls the visual input size of the model and greatly affects the memory and inference speed.
+Inside **ShowUI Advanced Settings** you can now find:
+
+- **Hardware detection JSON** that summarises CUDA/MPS status and VRAM detected by the installer.
+- **Local asset inventory** confirming whether the FP16 and AWQ checkpoints are present.
+- **Resource snapshot plot** powered by `psutil`/`pynvml` to visualise CPU/GPU utilisation.
+- **Auto-tuning assistant** with one-click application of the recommended preset and quantisation mode.
+
+Use the preset dropdown or the custom controls to balance quality, latency, and memory footprint. The recommendations are tailored to your hardware report.
 
 ### ShowUI Phone Split & Mobile Deployment
 
